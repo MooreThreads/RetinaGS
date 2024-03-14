@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: diff-gaussian-rasterization-metric
+Version: 0.0.1
+Summary: export two metrics from vanilla diff_gaussian_rasterization
+License-File: LICENSE.md
