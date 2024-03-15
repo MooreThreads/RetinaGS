@@ -1,6 +1,0 @@
-# ninja log v5
-15	3954	1710410183922712904	/jfs/burning/code_bases/DenseGaussian/rasterization_kernels/diff-gaussian-rasterization-metric/build/temp.linux-x86_64-cpython-37/cuda_rasterizer/forward.o	c37d2ab0918e0996
-15	4249	1710410184209435765	/jfs/burning/code_bases/DenseGaussian/rasterization_kernels/diff-gaussian-rasterization-metric/build/temp.linux-x86_64-cpython-37/cuda_rasterizer/backward.o	f12ca02f39d1ada7
-15	8773	1710410188741921802	/jfs/burning/code_bases/DenseGaussian/rasterization_kernels/diff-gaussian-rasterization-metric/build/temp.linux-x86_64-cpython-37/cuda_rasterizer/rasterizer_impl.o	d2e6171f42e3ea06
-15	22816	1710410202757003010	/jfs/burning/code_bases/DenseGaussian/rasterization_kernels/diff-gaussian-rasterization-metric/build/temp.linux-x86_64-cpython-37/ext.o	b536b9ab4116ef54
-16	45764	1710410225717532343	/jfs/burning/code_bases/DenseGaussian/rasterization_kernels/diff-gaussian-rasterization-metric/build/temp.linux-x86_64-cpython-37/rasterize_points.o	2a2298be1a1f68a2

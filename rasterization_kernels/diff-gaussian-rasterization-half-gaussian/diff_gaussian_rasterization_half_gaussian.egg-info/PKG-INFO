@@ -1,5 +1,0 @@
-Metadata-Version: 2.1
-Name: diff-gaussian-rasterization-half-gaussian
-Version: 0.0.1
-Summary: add space boundary basing on diff_gaussian_rasterization_ashawkey
-License-File: LICENSE.md
