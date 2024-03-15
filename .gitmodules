@@ -7,3 +7,6 @@
 [submodule "rasterization_kernels/diff-gaussian-rasterization-ashawkey"]
 	path = rasterization_kernels/diff-gaussian-rasterization-ashawkey
 	url = https://github.com/ashawkey/diff-gaussian-rasterization.git
+[submodule "rasterization_kernels/third_party/glm"]
+	path = rasterization_kernels/third_party/glm
+	url = https://github.com/g-truc/glm.git
