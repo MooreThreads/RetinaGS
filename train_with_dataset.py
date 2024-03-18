@@ -58,9 +58,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     iteration = first_iter
     for i_epoch in range(NUM_EPOCH):
-        train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, drop_last=False, num_workers=16, collate_fn=SimpleScene.get_batch)
+        train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene.get_batch)
 
         for data in train_loader:
+            if iteration > opt.iterations:
+                return
             iter_start.record()
 
             gaussians.update_learning_rate(iteration)
@@ -127,8 +129,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
             iteration += 1
-            if iteration >= opt.iterations:
-                return
 
 def prepare_output_and_logger(args):    
     if not args.model_path:
