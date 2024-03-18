@@ -1,3 +1,7 @@
 *.pyc
 .vscode
 /backup
+
+build/
+diff_gaussian_rasterization_*.egg-info/
+dist/
