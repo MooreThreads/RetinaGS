@@ -19,3 +19,4 @@ from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from scene.scene import Scene
 from scene.simple_scene import SimpleScene
+from scene.gaussian_nn_module import GaussianModel2, BoundedGaussianModel, BoundedGaussianModelGroup
