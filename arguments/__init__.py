@@ -87,6 +87,13 @@ class OptimizationParams(ParamGroup):
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
         self.random_background = False
+        
+        # New
+        self.epochs = 2000
+        self.densify_until_epoch = 200
+        self.save_epoch_interval = -1
+        self.eval_epoch_interval = 10
+        self.max_gaussians = 40_000_000
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
