@@ -58,11 +58,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gaussians.update_learning_rate(iteration) # update lr every epoch        
 
         for data in train_loader:
-            # if iteration > opt.iterations:
-            #     return
             iter_start.record()
-
-            # gaussians.update_learning_rate(iteration) # update lr every epoch        
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
@@ -100,18 +96,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 # Log and save
                 if iteration % 100 == 0:
                     training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))
-                # if (iteration in saving_iterations):
-                #     print("\n[ITER {}] Saving Gaussians".format(iteration))
-                #     scene.save(iteration, gaussians=gaussians)
 
                 # Densification
                 if epoch < opt.densify_until_epoch: # iteration < opt.densify_until_iter:
                     # Keep track of max radii in image-space for pruning
                     gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                     gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-
-                    # if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    if iteration > opt.densify_from_iter and iteration % opt.densification_interval and gaussians.get_xyz.shape[0] <= opt.max_gaussians:
+                    
+                    if iteration > opt.densify_from_iter and iteration % opt.densification_interval and gaussians.get_xyz.shape[0] <= opt.max_gaussians: # if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                         gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
                     
@@ -119,7 +111,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                         gaussians.reset_opacity()
 
                 # Optimizer step
-                # if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
@@ -130,7 +121,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             iteration += 1
 
         with torch.no_grad():
-            # training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_metric, (pipe, background))            
             if epoch % opt.eval_epoch_interval == 0:            
                 training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
                 
@@ -173,7 +163,6 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
         if iteration % 100 == 0:
             tb_writer.add_scalar('total_points', gaussians.get_xyz.shape[0], iteration)
         
-
 def training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
     # Report test and 1/8 of training set
     torch.cuda.empty_cache()
@@ -184,8 +173,6 @@ def training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, elapsed, testing
         if config['cameras'] and len(config['cameras']) > 0:
             l1_test = 0.0
             psnr_test = 0.0
-            # cnt_GS_test = 0.0
-            # cnt_MA_test = 0.0
             for idx, viewpoint in enumerate(config['cameras']):                
                 render_pkg = renderFunc(viewpoint, gaussians, *renderArgs)
                 image = torch.clamp(render_pkg["render"], 0.0, 1.0)
@@ -197,18 +184,12 @@ def training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, elapsed, testing
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=epoch)
                 l1_test += l1_loss(image, gt_image).mean().double()
                 psnr_test += psnr(image, gt_image).mean().double()
-            #     cnt_GS_test += render_pkg["cnt1"]
-            #     cnt_MA_test += render_pkg["cnt2"]
-            # cnt_GS_test /= len(config['cameras'])
-            # cnt_MA_test /= len(config['cameras'])
             psnr_test /= len(config['cameras'])
             l1_test /= len(config['cameras'])          
             print("\n[EPOCH {}] Evaluating {}: L1 {} PSNR {}".format(epoch, config['name'], l1_test, psnr_test))
             if tb_writer:
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, epoch)
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, epoch)
-                # tb_writer.add_scalar(config['name'] + '/loss_viewpoint - gspp', cnt_GS_test, epoch)
-                # tb_writer.add_scalar(config['name'] + '/loss_viewpoint - mags', cnt_MA_test, epoch)
 
     torch.cuda.empty_cache()
         
