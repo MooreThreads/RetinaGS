@@ -1,11 +1,17 @@
-# DenseGaussian
-gaussian_renderer/__init__ 和 DenseGaussian/scene/__init__ 不额外实现功能，且同文件夹新实现类分开py文件
-重构scene class，把可拆开的功能解耦成函数，scene本身作用变为仅挂载配置信息
-diff-gaussian-rasterization的新功能实现，直接挂载到文件夹rasterization_kernels
+# Organizational Reformations
 
-# train_with_dataset.py v.s. train.py
-On scene garden, we get:
-train_with_dataset.py:
-[ITER 30000] Evaluating train: L1 0.013847948797047139 PSNR 31.884959030151368 
-train.py:
-[ITER 30000] Evaluating train: L1 0.015808938443660738 PSNR 31.569805908203126 
+1. gaussian_renderer/__init__.py and scene/__init__.py have no additional implementation functionality. New implementation class should be a separate py file. 
+
+2. Reformat the scene class, decouple functions that can be broken down, the role of the scene itself is changed to just mount configuration information.
+
+3. The implementation of the new feature of diff-gaussian-rasterization, directly mounted to the rasterization_kernels folder.
+
+# Precision Validation
+
+Shold be done after new implementation of diff-gaussian-rasterization and py file of train.
+
+On scene garden, no eval, default hyper-parameters (only -m + -s):
+
+1. train.py: [ITER 30000] Evaluating train: L1 0.015808938443660738 PSNR 31.569805908203126 
+
+2. train_with_dataset.py: [ITER 30000] Evaluating train: L1 0.013847948797047139 PSNR 31.884959030151368 

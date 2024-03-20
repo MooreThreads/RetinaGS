@@ -17,7 +17,7 @@ glm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../third_pa
 
 setup(
     name="diff_gaussian_rasterization_metric",
-    version='0.0.1',
+    version='4.5.1',
     description='export two metrics from diff_gaussian_rasterization_ashawkey',
     packages=['diff_gaussian_rasterization_metric'],
     ext_modules=[
