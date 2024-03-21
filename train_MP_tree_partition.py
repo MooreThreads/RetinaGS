@@ -15,19 +15,16 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
 from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch
-from utils.datasets import DatasetRepeater, GroupedItems
 from utils.workload_utils import NaiveWorkloadBalancer
-
-from parallel_utils.schedulers.core import SendTask, RecvTask, RenderTask, MainRankTask
 
 import parallel_utils.schedulers.dynamic_space as psd 
 import parallel_utils.grid_utils.core as pgc
 import parallel_utils.grid_utils.gaussian_grid as pgg
 import parallel_utils.grid_utils.utils as ppu
 
-from scene import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
-from utils.datasets import CameraListDataset
+from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
 from scene.scene4bounded_gaussian import SceneV3
 
 try:
@@ -44,18 +41,9 @@ EVAL_PSNR_INTERVAL = 8
 MAX_SIZE_SINGLE_GS = int(6e7)
 Z_NEAR = 0.01
 Z_FAR = 1*1000
-Z_FAR_SMALL = 400
 SAVE_INTERVAL_EPOCH = 10
 SAVE_INTERVAL_ITER = 5000
-START_DENSIFICATION_EPOCH = 0
 SKIP_PRUNE_AFTER_RESET = 3000
-RESET_OPACITY_INTERVAL_EPOCH = 10 
-RESET_OPACITY_END_EPOCH = 30
-REPARTITION_INTERVAL_EPOCH = 50
-REPARTITION_START_EPOCH = 30
-REPARTITION_END_EPOCH = 150
-
-
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -201,7 +189,7 @@ def get_grouped_indices_dist(model2rank:dict, relation_matrix:torch.Tensor, shuf
         g_head += g_size
     return groups  
 
-def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:list, batch_size:int, NUM_MODEL:int, logger:logging.Logger):
+def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:list, NUM_MODEL:int, logger:logging.Logger):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
 
     train_dataset: CameraListDataset = scene.getTrainCameras() 
@@ -341,7 +329,7 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
 
 def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, checkpoint_iterations, debug_from, LOGGERS):
     # training-constant states
-    RANK, WORLD_SIZE, BATCH_SIZE, MAX_LOAD = dist.get_rank(), dist.get_world_size(), dataset_args.batch_size, dataset_args.max_load
+    RANK, WORLD_SIZE, MAX_LOAD, MAX_BATCH_SIZE = dist.get_rank(), dist.get_world_size(), pipe.max_load, pipe.max_batch_size
     LOCAL_WORLD_SIZE = int(os.environ["LOCAL_WORLD_SIZE"]) # --nproc-per-node specified on torchrun
     NUM_NODE = WORLD_SIZE // LOCAL_WORLD_SIZE
     tb_writer:SummaryWriter = LOGGERS[0]
@@ -351,10 +339,10 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
     if ply_iteration <= 0:
-        SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = pgg.init_grid_dist(scene=scene)
+        SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = pgg.init_grid_dist(scene=scene, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
         path2node_info_dict = None
     else:
-        SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration)
+        SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
         
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
     logger.info(f"grid parameters: {SPACE_RANGE_LOW}, {SPACE_RANGE_UP}, {VOXEL_SIZE}, {scene_3d_grid.grid_size}")
@@ -382,7 +370,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     #  create partition of space or load it 
     if ply_iteration <= 0:
         if RANK == 0:
-            path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(scene_3d_grid, BVH_DEPTH, load=None, position=scene.point_cloud.points, logger=logger)
+            path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(scene_3d_grid, BVH_DEPTH, load=None, position=scene.point_cloud.points, logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
             logger.info(f'get tree\n{tree_str}')
             if len(sorted_leaf_nodes) != 2**BVH_DEPTH:
                 logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}') 
@@ -433,7 +421,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     # prepare dataset after the division of model/space, as the blender_order is affected by division
     # train_rlt, evalset_rlt need to be updated after every division of model/space
     train_dataset, eval_test_dataset, eval_train_list, train_rlt, evalset_rlt = init_datasets_dist(
-        scene=scene, opt=opt, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, batch_size=BATCH_SIZE, NUM_MODEL=len(model_id2box), logger=logger 
+        scene=scene, opt=opt, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, NUM_MODEL=len(model_id2box), logger=logger 
     )
     validation_configs = ({'name':'test', 'cameras': eval_test_dataset, 'rlt':evalset_rlt}, 
                         {'name':'train', 'cameras': eval_train_list, 'rlt':train_rlt})
@@ -454,6 +442,11 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     start_epoch = int(round(iteration/len(train_dataset)))
     logger.info('start from epoch {}'.format(start_epoch))
     NUM_EPOCH = opt.epochs - start_epoch
+
+    REPARTITION_START_EPOCH = (opt.densify_from_iter // len(train_dataset) + 1)
+    REPARTITION_END_EPOCH = opt.densify_until_iter // len(train_dataset)
+    REPARTITION_INTERVAL_EPOCH = REPARTITION_END_EPOCH // 3 # replit 3 time is enough for most scene 
+
     last_prune_iteration = -1
     progress_bar = tqdm(range(first_iter, NUM_EPOCH*len(train_dataset)), desc="Training progress") if RANK == 0 else None 
 
@@ -464,7 +457,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             del train_loader
 
         groups = get_grouped_indices_dist(model2rank=model_id2rank, relation_matrix=train_rlt, shuffled_indices=indices, 
-                                          max_task=MAX_LOAD, max_batch=BATCH_SIZE)   
+                                          max_task=MAX_LOAD, max_batch=MAX_BATCH_SIZE)   
         grouped_train_dataset = GroupedItems(train_dataset, groups) 
         logger.info("build groups of data items")
 
@@ -628,7 +621,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     tb_writer.add_scalar('cnt/num_rendered', total_num_rendered, iteration)
 
                 pgc.update_densification_stat(iteration, opt, gaussians_group, local_render_rets, tb_writer, logger)
-                pgc.densification(iteration, batch_size, (iteration-last_prune_iteration)<SKIP_PRUNE_AFTER_RESET, opt, scene, gaussians_group, local_render_rets, tb_writer, logger)
+                pgc.densification(iteration, batch_size, (iteration-last_prune_iteration)<SKIP_PRUNE_AFTER_RESET, opt, scene, gaussians_group, tb_writer, logger)
                 if pgc.reset_opacity(iteration, batch_size, opt, dataset_args, gaussians_group, tb_writer, logger):
                     last_prune_iteration = iteration
 
@@ -673,7 +666,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     iter_time, testing_iterations, validation_configs, 
                     scene, gaussians_group, scheduler)
             
-            if (i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH) and (iteration <= opt.densify_until_iter):
+            if ((i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH) and (iteration <= opt.densify_until_iter)):
                 t0 = time.time()
                 logger.info('before resplit\n' + gaussians_group.get_info())
                 new_path2bvh_nodes, new_sorted_leaf_nodes, new_tree_str, dst_model2box, dst_model2rank, dst_local_model_ids, dst_id2msgs = psd.eval_load_and_divide_grid_dist(
@@ -840,7 +833,6 @@ if __name__ == "__main__":
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
 
     args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
 
     # Initialize system state (RNG)
     safe_state(args.quiet, init_gpu=False)

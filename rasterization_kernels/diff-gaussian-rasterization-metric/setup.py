@@ -24,9 +24,9 @@ setup(
         CUDAExtension(
             name="diff_gaussian_rasterization_metric._C",
             sources=[
-            "cuda_rasterizer/rasterizer_impl.cu",
-            "cuda_rasterizer/forward.cu",
-            "cuda_rasterizer/backward.cu",
+            "cuda_rasterizer_metric/rasterizer_impl.cu",
+            "cuda_rasterizer_metric/forward.cu",
+            "cuda_rasterizer_metric/backward.cu",
             "rasterize_points.cu",
             "ext.cpp"],
             extra_compile_args={"nvcc": ["-I" + glm_path]})

@@ -14,6 +14,7 @@ from torch import nn
 import numpy as np
 from utils.graphics_utils import getView2World, getWorld2View2, getProjectionMatrix
 
+
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
@@ -55,15 +56,44 @@ class Camera(nn.Module):
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(data_device)
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.projection_matrix_inv = torch.tensor(getView2World(R, T, trans, scale), dtype=torch.float32).transpose(0, 1).to(data_device)
+
 
     def to_device(self, device):
         self.data_device = device
         self.original_image = self.original_image.to(device)
         self.world_view_transform = self.world_view_transform.to(device)
         self.projection_matrix = self.projection_matrix.to(device)
+        self.projection_matrix_inv = self.projection_matrix_inv.to(device)
         self.full_proj_transform = self.full_proj_transform.to(device)
         self.camera_center = self.camera_center.to(device)
         return self
+
+    @staticmethod
+    def package_shape():
+        return (16, 4)
+    
+    def pack_up(self, device=None):
+        if device is None:
+            device = self.data_device
+        ret = torch.zeros((16, 4), dtype=torch.float32, device=self.data_device, requires_grad=False)
+        ret[0:4, :] = self.world_view_transform
+        ret[4:8, :] = self.full_proj_transform
+        ret[8:12,:] = self.projection_matrix_inv
+        ret[12, 0] = self.image_width
+        ret[12, 1] = self.image_height
+        ret[12, 2] = self.FoVx
+        ret[12, 3] = self.FoVy
+        ret[13, 0:3] = self.camera_center
+        
+        return ret.to(device)
+    
+    def get_depth(self, point3d:list) -> float:
+        point3d_homo = torch.ones((1,4), dtype=torch.float32, device=self.data_device)
+        point3d_homo[0, :3] = torch.tensor(point3d, dtype=torch.float32, device=self.data_device)
+        point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
+        return float(point3d_view[0, 2])
+
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
@@ -77,6 +107,7 @@ class MiniCam:
         self.full_proj_transform = full_proj_transform
         view_inv = torch.inverse(self.world_view_transform)
         self.camera_center = view_inv[3][:3]
+
 
 class ViewMessage(nn.Module):
     def __init__(self, package: torch.Tensor, id: int) -> None:
@@ -118,6 +149,7 @@ class ViewMessage(nn.Module):
             self.id, self.image_height, self.image_width
         )
     
+
 class CamerawithDepth(Camera):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, depth, gt_alpha_mask,
                  image_name, uid,
@@ -184,6 +216,7 @@ class CamerawithDepth(Camera):
         point3d_homo[0, :3] = torch.tensor(point3d, dtype=torch.float32, device=self.data_device)
         point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
         return float(point3d_view[0, 2])
+
 
 class EmptyCamera(nn.Module):
     '''

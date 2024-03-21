@@ -9,7 +9,7 @@ import torch.distributed as dist
 from parallel_utils.grid_utils.utils import BoxinGrid3D, Grid3DSpace
 import parallel_utils.schedulers.dynamic_space as psd 
 from parallel_utils.schedulers.core import SendTask, RecvTask, RenderTask, MainRankTask
-from scene import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
 from scene.scene4bounded_gaussian import SceneV3
 from utils.general_utils import is_interval_in_batch, is_point_in_batch

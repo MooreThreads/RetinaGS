@@ -14,7 +14,7 @@ import parallel_utils.grid_utils.core as pgc
 from parallel_utils.schedulers.core import SendTask, RecvTask, RenderTask, MainRankTask
 import parallel_utils.schedulers.dynamic_space as psd 
 
-from scene import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
 from scene.scene4bounded_gaussian import SceneV3
 

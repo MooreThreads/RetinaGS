@@ -18,8 +18,8 @@
 #include <stdio.h>
 #include <cuda_runtime_api.h>
 #include <memory>
-#include "cuda_rasterizer/config.h"
-#include "cuda_rasterizer/rasterizer.h"
+#include "cuda_rasterizer_hgs/config.h"
+#include "cuda_rasterizer_hgs/rasterizer.h"
 #include <fstream>
 #include <string>
 #include <functional>
@@ -33,7 +33,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
 }
 
 std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
-RasterizeGaussiansCUDA(
+RasterizeGaussiansCUDA_hgs(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
     const torch::Tensor& colors,
@@ -91,7 +91,7 @@ RasterizeGaussiansCUDA(
 		M = sh.size(1);
       }
 
-	  rendered = CudaRasterizer::Rasterizer::forward(
+	  rendered = CudaRasterizer_hgs::Rasterizer::forward(
 	    geomFunc,
 		binningFunc,
 		imgFunc,
@@ -125,7 +125,7 @@ RasterizeGaussiansCUDA(
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
- RasterizeGaussiansBackwardCUDA(
+ RasterizeGaussiansBackwardCUDA_hgs(
  	const torch::Tensor& background,
 	const torch::Tensor& means3D,
 	const torch::Tensor& radii,
@@ -177,7 +177,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   
   if(P != 0)
   {  
-	  CudaRasterizer::Rasterizer::backward(P, degree, M, R,
+	  CudaRasterizer_hgs::Rasterizer::backward(P, degree, M, R,
 	  background.contiguous().data<float>(),
 	  W, H, 
 	  means3D.contiguous().data<float>(),
@@ -219,7 +219,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   return std::make_tuple(dL_dmeans2D, dL_dcolors, dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations);
 }
 
-torch::Tensor markVisible(
+torch::Tensor markVisible_hgs(
 		torch::Tensor& means3D,
 		torch::Tensor& viewmatrix,
 		torch::Tensor& projmatrix)
@@ -230,7 +230,7 @@ torch::Tensor markVisible(
  
   if(P != 0)
   {
-	CudaRasterizer::Rasterizer::markVisible(P,
+	CudaRasterizer_hgs::Rasterizer::markVisible(P,
 		means3D.contiguous().data<float>(),
 		viewmatrix.contiguous().data<float>(),
 		projmatrix.contiguous().data<float>(),

@@ -33,7 +33,10 @@ class SceneV3:
         self.model_path = args.model_path
         self.loaded_iter = None
         self.gaussians_group = gaussians_group
-        self.padding_width = args.padding_width
+        try:
+            self.padding_width = args.padding_width
+        except:
+            self.padding_width = 0    
 
         if load_iteration:
             if load_iteration == -1:

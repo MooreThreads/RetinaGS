@@ -20,7 +20,8 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from gaussian_renderer import render, render2, render_with_GR2
+from gaussian_renderer.render import render
+from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
 from scene.cameras import ViewMessage, Camera
 
 
@@ -510,7 +511,7 @@ class GaussianModel2(nn.Module):
         return None
 
     def forward(self, viewpoint_cam, pipe, background):
-        return render2(viewpoint_cam, self, pipe, background)            
+        return render(viewpoint_cam, self, pipe, background)            
 
 
 class BoundedGaussianModel(GaussianModel2):
@@ -519,7 +520,7 @@ class BoundedGaussianModel(GaussianModel2):
         self.max_size = max_size
 
     def forward(self, viewpoint_cam, pipe, background, need_buffer:bool=False):
-        all_ret = render_with_GR2(viewpoint_cam, self, pipe, background)   
+        all_ret = render4BoundedGaussianModel(viewpoint_cam, self, pipe, background)   
         if need_buffer:
             return all_ret
         else:

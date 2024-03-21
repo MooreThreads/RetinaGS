@@ -11,7 +11,7 @@ import parallel_utils.grid_utils.core as pgc
 import parallel_utils.grid_utils.gaussian_grid as pgg
 import parallel_utils.grid_utils.utils as ppu
 
-from scene import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
 from utils.datasets import CameraListDataset
 from scene.scene4bounded_gaussian import SceneV3
@@ -575,7 +575,7 @@ def eval_load_and_divide_grid_dist(
         # use gloabl_send_size to organize send/recv instead of relying on send_gs_task, recv_gs_task
         self_recv_buffer, recv_gs_task2space = minimal_send_recv_GS(
             src_local_model_ids, src_model2rank, dst_local_model_ids, dst_model2rank, 
-            global_send_size_np, send_gs_task2msg, scheduler, logger
+            global_send_size_np, send_gs_task2msg, scheduler, logger, MAX_GS_CHANNEL=MAX_GS_CHANNEL
         )
         del send_gs_task2msg    # release sub-packages after sending
         torch.cuda.empty_cache()
