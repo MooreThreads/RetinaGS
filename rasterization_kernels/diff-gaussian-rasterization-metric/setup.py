@@ -17,16 +17,16 @@ glm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../third_pa
 
 setup(
     name="diff_gaussian_rasterization_metric",
-    version='0.0.1',
+    version='4.5.1',
     description='export two metrics from diff_gaussian_rasterization_ashawkey',
     packages=['diff_gaussian_rasterization_metric'],
     ext_modules=[
         CUDAExtension(
             name="diff_gaussian_rasterization_metric._C",
             sources=[
-            "cuda_rasterizer/rasterizer_impl.cu",
-            "cuda_rasterizer/forward.cu",
-            "cuda_rasterizer/backward.cu",
+            "cuda_rasterizer_metric/rasterizer_impl.cu",
+            "cuda_rasterizer_metric/forward.cu",
+            "cuda_rasterizer_metric/backward.cu",
             "rasterize_points.cu",
             "ext.cpp"],
             extra_compile_args={"nvcc": ["-I" + glm_path]})

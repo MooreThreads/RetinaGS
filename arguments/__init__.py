@@ -66,6 +66,8 @@ class PipelineParams(ParamGroup):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
+        self.max_batch_size = 2
+        self.max_load = 2
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):
@@ -75,6 +77,10 @@ class OptimizationParams(ParamGroup):
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
+        self.scaling_lr_init = 0.005
+        self.scaling_lr_final = 0.00005
+        self.scaling_lr_delay_mult = 0.01
+        self.scaling_lr_max_steps = -1
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005

@@ -19,16 +19,16 @@ glm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../third_pa
 
 setup(
     name="diff_gaussian_rasterization_half_gaussian",
-    version='0.0.1',
+    version='0.0.2',
     description='add space boundary basing on diff_gaussian_rasterization_ashawkey',
     packages=['diff_gaussian_rasterization_half_gaussian'],
     ext_modules=[
         CUDAExtension(
             name="diff_gaussian_rasterization_half_gaussian._C",
             sources=[
-            "cuda_rasterizer/rasterizer_impl.cu",
-            "cuda_rasterizer/forward.cu",
-            "cuda_rasterizer/backward.cu",
+            "cuda_rasterizer_hgs/rasterizer_impl.cu",
+            "cuda_rasterizer_hgs/forward.cu",
+            "cuda_rasterizer_hgs/backward.cu",
             "rasterize_points.cu",
             "ext.cpp"],
             extra_compile_args={"nvcc": ["-I" + glm_path]})

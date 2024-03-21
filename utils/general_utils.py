@@ -109,7 +109,7 @@ def build_scaling_rotation(s, r):
     L = R @ L
     return L
 
-def safe_state(silent):
+def safe_state(silent, init_gpu=True):
     old_f = sys.stdout
     class F:
         def __init__(self, silent):
@@ -130,4 +130,21 @@ def safe_state(silent):
     random.seed(0)
     np.random.seed(0)
     torch.manual_seed(0)
-    torch.cuda.set_device(torch.device("cuda:0"))
+    if init_gpu:
+        torch.cuda.set_device(torch.device("cuda:0"))
+
+def is_interval_in_batch(start_iter:int, batch_size:int, interval_size:int, low_limit=0):
+    assert batch_size > 0 and interval_size > 0
+    if start_iter <= low_limit:
+        return False
+    if batch_size >= interval_size:
+        return True
+    if batch_size == 1:
+        return (start_iter % interval_size) == 0
+    else:
+        res_head = (start_iter % interval_size)
+        res_tail = ((start_iter + batch_size - 1) % interval_size)
+        return (res_head == 0) or (res_head > res_tail)
+
+def is_point_in_batch(start_iter:int, batch_size:int, point: int):
+    return start_iter <= point < (start_iter + batch_size)

@@ -15,17 +15,17 @@ from torch.utils.data import DataLoader
 import os, glob
 from tqdm import tqdm
 from utils.loss_utils import ssim
-# from lpipsPyTorch import lpips
+from lpipsPyTorch import lpips
 from utils.image_utils import psnr
 from os import makedirs
 from gaussian_renderer.render_metric import render
-# from gaussian_renderer.render import render
-# from gaussian_renderer.render_ashawkey import render
+from gaussian_renderer.render import render as render_2
+from gaussian_renderer.render_half_gs import render4BoundedGaussianModel as render_3
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args, OptimizationParams
-from gaussian_renderer import GaussianModel
+from scene.gaussian_model import GaussianModel
 import json
 
 def render_wrapper(viewpoint_cam, gaussians, pipe, background):
@@ -63,7 +63,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         cnt_GS, cnt_MA = render_pkg["cnt1"], render_pkg["cnt2"]
         psnr_image = psnr(rendering, gt).mean()
         ssim_image = ssim(rendering, gt)
-        # lpips_image = lpips(rendering, gt)
+        lpips_image = lpips(rendering, gt)
         
         # find activated gs by check grad
         loss = torch.abs(gt - rendering).sum()

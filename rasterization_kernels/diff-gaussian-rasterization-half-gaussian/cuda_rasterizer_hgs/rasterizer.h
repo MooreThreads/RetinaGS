@@ -15,7 +15,7 @@
 #include <vector>
 #include <functional>
 
-namespace CudaRasterizer
+namespace CudaRasterizer_hgs
 {
 	class Rasterizer
 	{

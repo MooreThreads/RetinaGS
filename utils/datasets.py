@@ -86,3 +86,71 @@ class EmptyCameraListDataset(Dataset):
             uid=idx,
             data_device='cpu'
         )
+    
+
+class DatasetRepeater(Dataset):
+    '''
+    torch.utils.data.Dataset for DDP and the convenience of debug
+    '''
+    def __init__(self, origin:Dataset, repeat_utill:int, empty:bool, step:int=1) -> None:
+        super().__init__()
+        self.origin = origin
+        self.repeat_utill = repeat_utill
+        self.empty = empty
+        self.step = step
+        
+    def __len__(self):
+        return self.repeat_utill
+
+    def __getitem__(self, idx):     
+        if self.empty:
+            return None
+        else:
+            _i = (idx * self.step) % len(self.origin)
+            return self.origin.__getitem__(_i)
+
+
+class PartOfDataset(Dataset):
+    '''
+    torch.utils.data.Dataset for DDP and the convenience of debug
+    '''
+    def __init__(self, origin:Dataset, empty:bool, start:int=0, end:int=None) -> None:
+        super().__init__()
+        self.origin = origin
+        self.start = start
+        self.empty = empty
+        if end is None:
+            self.end = len(self.origin)
+        else:
+            self.end = end    
+        self.len:int = self.end - self.start    
+        
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):     
+        if self.empty:
+            return None
+        else:
+            _i = (idx + self.start) % len(self.origin)
+            return self.origin.__getitem__(_i)
+
+
+class GroupedItems(Dataset):
+    '''
+    using tuple[tuple[int]] to grup the items
+    '''
+    def __init__(self, origin:Dataset, groups:tuple) -> None:
+        super().__init__()
+        self.origin: Dataset = origin
+        self.groups: tuple = groups
+        
+    def __len__(self):
+        return len(self.groups)
+
+    def __getitem__(self, idx):     
+        _group = self.groups[idx]
+        _data = tuple(self.origin[_i] for _i in _group)
+        
+        return _group, _data
+

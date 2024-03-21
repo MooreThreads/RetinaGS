@@ -138,7 +138,7 @@ __global__ void identifyTileRanges(int L, uint64_t* point_list_keys, uint2* rang
 }
 
 // Mark Gaussians as visible/invisible, based on view frustum testing
-void CudaRasterizer::Rasterizer::markVisible(
+void CudaRasterizer_metric::Rasterizer::markVisible(
 	int P,
 	float* means3D,
 	float* viewmatrix,
@@ -152,14 +152,13 @@ void CudaRasterizer::Rasterizer::markVisible(
 		present);
 }
 
-CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P)
+CudaRasterizer_metric::GeometryState CudaRasterizer_metric::GeometryState::fromChunk(char*& chunk, size_t P)
 {
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
 	obtain(chunk, geom.means2D, P, 128);
-	obtain(chunk, geom.zw, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
@@ -170,7 +169,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	return geom;
 }
 
-CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, size_t N)
+CudaRasterizer_metric::ImageState CudaRasterizer_metric::ImageState::fromChunk(char*& chunk, size_t N)
 {
 	ImageState img;
 	obtain(chunk, img.n_contrib, N, 128);
@@ -178,7 +177,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	return img;
 }
 
-CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chunk, size_t P)
+CudaRasterizer_metric::BinningState CudaRasterizer_metric::BinningState::fromChunk(char*& chunk, size_t P)
 {
 	BinningState binning;
 	obtain(chunk, binning.point_list, P, 128);
@@ -195,7 +194,7 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
-int CudaRasterizer::Rasterizer::forward(
+int CudaRasterizer_metric::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
 	std::function<char* (size_t)> imageBuffer,
@@ -212,16 +211,16 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* cov3D_precomp,
 	const float* viewmatrix,
 	const float* projmatrix,
-	const float* projmatrix_inv,
-	const float* range_low,
-	const float* range_up,
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
 	float* out_color,
 	float* out_depth,
+	float* out_cnt,
+	double* out_cnt2,
 	float* out_alpha,
 	int* radii,
+	double* area_2d,
 	bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -267,8 +266,8 @@ int CudaRasterizer::Rasterizer::forward(
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
 		radii,
+		area_2d,
 		geomState.means2D,
-		geomState.zw,		
 		geomState.depths,
 		geomState.cov3D,
 		geomState.rgb,
@@ -285,14 +284,11 @@ int CudaRasterizer::Rasterizer::forward(
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
 	int num_rendered;
 	CHECK_CUDA(cudaMemcpy(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost), debug);
-	
+
 	size_t binning_chunk_size = required<BinningState>(num_rendered);
-	// printf("%d\n", P);
-	// printf("%d\n", num_rendered);
-	// printf("%d\n", binning_chunk_size);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
-	
+
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
 	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
@@ -333,11 +329,8 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
-		tan_fovx, tan_fovy,
-		geomState.zw,
-		projmatrix_inv,
-		range_low, range_up,
 		geomState.means2D,
+		area_2d,
 		feature_ptr,
 		geomState.depths,
 		geomState.conic_opacity,
@@ -345,14 +338,16 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_depth), debug);
+		out_depth,
+		out_cnt,
+		out_cnt2), debug);
 
 	return num_rendered;
 }
 
 // Produce necessary gradients for optimization, corresponding
 // to forward render pass
-void CudaRasterizer::Rasterizer::backward(
+void CudaRasterizer_metric::Rasterizer::backward(
 	const int P, int D, int M, int R,
 	const float* background,
 	const int width, int height,
@@ -366,9 +361,6 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* cov3D_precomp,
 	const float* viewmatrix,
 	const float* projmatrix,
-	const float* projmatrix_inv,
-	const float* range_low,
-	const float* range_up,
 	const float* campos,
 	const float tan_fovx, float tan_fovy,
 	const int* radii,
@@ -416,11 +408,6 @@ void CudaRasterizer::Rasterizer::backward(
 		imgState.ranges,
 		binningState.point_list,
 		width, height,
-		tan_fovx, tan_fovy,
-		projmatrix_inv,
-		range_low,
-		range_up,
-		geomState.zw,
 		background,
 		geomState.means2D,
 		geomState.conic_opacity,

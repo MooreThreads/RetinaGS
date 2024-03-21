@@ -16,7 +16,7 @@
 #include "rasterizer.h"
 #include <cuda_runtime_api.h>
 
-namespace CudaRasterizer
+namespace CudaRasterizer_hgs
 {
 	template <typename T>
 	static void obtain(char*& chunk, T*& ptr, std::size_t count, std::size_t alignment)
@@ -34,6 +34,7 @@ namespace CudaRasterizer
 		bool* clamped;
 		int* internal_radii;
 		float2* means2D;
+		float2* zw;
 		float* cov3D;
 		float4* conic_opacity;
 		float* rgb;
