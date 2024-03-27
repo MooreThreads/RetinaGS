@@ -71,7 +71,7 @@ class SimpleScene:
     
     def load2gaussians(self, gaussians:GaussianModel):
         if self.loaded_iter:
-            gaussians.load_ply(os.path.join(self.model_path,
+            gaussians.load_ply_own(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
