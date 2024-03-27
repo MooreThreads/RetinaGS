@@ -14,7 +14,7 @@ import torch
 from torch.utils.data import DataLoader
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render
+from gaussian_renderer.render import render
 import sys
 from scene import SimpleScene, GaussianModel
 from utils.general_utils import safe_state

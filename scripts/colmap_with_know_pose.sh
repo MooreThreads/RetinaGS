@@ -1,0 +1,43 @@
+DATA_PATH=/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/colmap/Mill_19/building-pixsfm
+
+mkdir $DATA_PATH/gt_pose
+colmap feature_extractor \
+    --ImageReader.camera_model PINHOLE \
+    --database_path "$DATA_PATH/gt_pose/database.db" \
+    --image_path "$DATA_PATH/images" \
+    --ImageReader.single_camera 1 \
+    --SiftExtraction.use_gpu 1
+
+# 改内参 (optional)
+# from https://colmap.github.io/faq.html:
+# If your known camera intrinsics have large distortion coefficients, 
+# you should now manually copy the parameters from your cameras.txt to the database, 
+# such that the matcher can leverage the intrinsics. 
+python scripts/colmap_intrinsics.py \
+    --db_path "$DATA_PATH/gt_pose/database.db" \
+    --camera_txt "$DATA_PATH/sparse/cameras.txt"
+
+# 改image ID，对应到db 
+# you might set change camera_id of images in this step 
+# if cameras in db are not modified to match images
+python scripts/change_image_id.py \
+    --db_path "$DATA_PATH/gt_pose/database.db" \
+    --image_txt "$DATA_PATH/sparse/images.txt"
+
+colmap exhaustive_matcher \
+    --database_path "$DATA_PATH/gt_pose/database.db" \
+    --SiftMatching.use_gpu 1 \
+    --SiftMatching.gpu_index 0,1,2,3
+
+mkdir -p $DATA_PATH/gt_pose/triangulated/sparse
+
+colmap point_triangulator \
+    --database_path "$DATA_PATH/gt_pose/database.db" \
+    --image_path "$DATA_PATH/images" \
+    --input_path "$DATA_PATH/sparse" \
+    --output_path "$DATA_PATH/sparse/0" \
+    --Mapper.ba_refine_focal_length 0 \
+    --Mapper.ba_refine_extra_params 0
+
+
+
