@@ -13,7 +13,8 @@ import os
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render, network_gui
+from gaussian_renderer.render import render
+from gaussian_renderer import  network_gui
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
@@ -162,8 +163,9 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration in testing_iterations:
         torch.cuda.empty_cache()
+        train_dataset = scene.getTrainCameras()        
         validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
-                              {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
+                              {'name': 'train', 'cameras' : [train_dataset[idx] for idx in range(0, len(train_dataset), 8)]}) 
 
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:

@@ -41,8 +41,8 @@ EVAL_PSNR_INTERVAL = 8
 MAX_SIZE_SINGLE_GS = int(6e7)
 Z_NEAR = 0.01
 Z_FAR = 1*1000
-SAVE_INTERVAL_EPOCH = 10
-SAVE_INTERVAL_ITER = 5000
+SAVE_INTERVAL_EPOCH = 1000
+SAVE_INTERVAL_ITER = 50000
 SKIP_PRUNE_AFTER_RESET = 3000
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -658,7 +658,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         scheduler.record_info() 
 
         with torch.no_grad():
-            if (i_epoch % SAVE_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):
+            if (i_epoch % SAVE_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):
                 save_GS(iteration=iteration, model_path=scene.model_path, gaussians_group=gaussians_group, path2node=path2bvh_nodes)
                 eval(
                     tb_writer, logger, iteration, Ll1_main_rank, loss_main_rank, batch_size,
