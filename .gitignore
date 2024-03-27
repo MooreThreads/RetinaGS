@@ -2,11 +2,12 @@
 .vscode
 *.sh
 /backup
+/output
+__pycache__
 
 build/
 diff_gaussian_rasterization_*.egg-info/
 dist/
-glm/
 
 !train_scripts/*.sh
 !scripts/colmap_complete_process.sh

@@ -85,7 +85,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         cnt_GSPI += GSPI_image
         cnt_ssim += ssim_image.item()
         cnt_psnr += psnr_image.item()
-        # cnt_lpips += lpips_image.item()
+        cnt_lpips += lpips_image.item()
        
         
         # save and log
@@ -94,7 +94,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             torchvision.utils.save_image(gt, os.path.join(gts_path, view.image_name + ".png"))
         
         per_view_dict[name][view.image_name] = {
-                                                # "LPIPS": lpips_image.item(),                                                                        
+                                                "LPIPS": lpips_image.item(),                                                                        
                                                 "SSIM": ssim_image.item(),
                                                 "PSNR": psnr_image.item(),
                                                 "GSPI": GSPI_image,
