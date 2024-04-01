@@ -1,4 +1,4 @@
-DATA_PATH=/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/colmap/Mill_19/building-pixsfm
+DATA_PATH=/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/colmap/Mill_19/rubble-pixsfm
 
 mkdir $DATA_PATH/gt_pose
 colmap feature_extractor \
@@ -29,7 +29,7 @@ colmap exhaustive_matcher \
     --SiftMatching.use_gpu 1 \
     --SiftMatching.gpu_index 0,1,2,3
 
-mkdir -p $DATA_PATH/gt_pose/triangulated/sparse
+mkdir -p $DATA_PATH/sparse/0
 
 colmap point_triangulator \
     --database_path "$DATA_PATH/gt_pose/database.db" \
@@ -39,5 +39,13 @@ colmap point_triangulator \
     --Mapper.ba_refine_focal_length 0 \
     --Mapper.ba_refine_extra_params 0
 
+# Note that the sparse reconstruction step is not necessary in order to compute a dense model from known camera poses. 
+# Assuming you computed a sparse model from the known camera poses, you can compute a dense model as follows:
+colmap patch_match_stereo \
+    --workspace_path "$DATA_PATH/gt_pose/dense" \
+    --PatchMatchStereo.gpu_index 7
 
+colmap stereo_fusion \
+    --workspace_path "$DATA_PATH/gt_pose/dense" \
+    --output_path "$DATA_PATH/gt_pose/dense/fused.ply"
 

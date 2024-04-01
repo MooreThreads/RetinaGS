@@ -33,21 +33,35 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-# todo: add arg parser for GLOBAL_VARIABLE
 MAX_GS_CHANNEL = 59*3
 SPLIT_ORDERS = [0, 1]
+ENABLE_REPARTITION = False
 SCENE_GRID_SIZE = np.array([2*1024, 2*1024, 1], dtype=int)
 EVAL_PSNR_INTERVAL = 8
 MAX_SIZE_SINGLE_GS = int(6e7)
 Z_NEAR = 0.01
 Z_FAR = 1*1000
-SAVE_INTERVAL_EPOCH = 1000
+EVAL_INTERVAL_EPOCH = 5
+SAVE_INTERVAL_EPOCH = 1
 SAVE_INTERVAL_ITER = 50000
 SKIP_PRUNE_AFTER_RESET = 3000
+SKIP_SPLIT = True
+SKIP_CLONE = True
+def grid_setup(args, logger:logging.Logger):
+    ENABLE_REPARTITION = args.ENABLE_REPARTITION
+    EVAL_PSNR_INTERVAL = args.EVAL_PSNR_INTERVAL
+    Z_NEAR = args.Z_NEAR
+    Z_FAR = args.Z_FAR
+    EVAL_INTERVAL_EPOCH = args.EVAL_INTERVAL_EPOCH
+    SAVE_INTERVAL_EPOCH = args.SAVE_INTERVAL_EPOCH
+    SAVE_INTERVAL_ITER = args.SAVE_INTERVAL_ITER
+    SKIP_PRUNE_AFTER_RESET = args.SKIP_PRUNE_AFTER_RESET
+    SKIP_SPLIT = args.SKIP_SPLIT
+    SKIP_CLONE = args.SKIP_CLONE
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=5)
+GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=10)
 
 class CamerawithRelation(Dataset):
     def __init__(self, dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger) -> None:
@@ -351,7 +365,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     first_iter = 0
     bg_color = [1, 1, 1] if dataset_args.white_background else [0, 0, 0]
     background = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
-    final_background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")    
+    final_background = torch.tensor(bg_color, dtype=torch.float32, device="cuda") if not opt.random_background else None 
 
     task_parser = psd.TaskParser(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
     space_task_parser = psd.SpaceTaskMatcher(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
@@ -621,7 +635,10 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     tb_writer.add_scalar('cnt/num_rendered', total_num_rendered, iteration)
 
                 pgc.update_densification_stat(iteration, opt, gaussians_group, local_render_rets, tb_writer, logger)
-                pgc.densification(iteration, batch_size, (iteration-last_prune_iteration)<SKIP_PRUNE_AFTER_RESET, opt, scene, gaussians_group, tb_writer, logger)
+                pgc.densification(iteration, batch_size, 
+                                  (iteration-last_prune_iteration)<SKIP_PRUNE_AFTER_RESET, 
+                                  SKIP_CLONE, SKIP_SPLIT,
+                                  opt, scene, gaussians_group, tb_writer, logger)
                 if pgc.reset_opacity(iteration, batch_size, opt, dataset_args, gaussians_group, tb_writer, logger):
                     last_prune_iteration = iteration
 
@@ -660,13 +677,14 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         with torch.no_grad():
             if (i_epoch % SAVE_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):
                 save_GS(iteration=iteration, model_path=scene.model_path, gaussians_group=gaussians_group, path2node=path2bvh_nodes)
+            if (i_epoch % EVAL_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):    
                 eval(
                     tb_writer, logger, iteration, Ll1_main_rank, loss_main_rank, batch_size,
                     l1_loss, render_func, model_id2rank, local_func_blender,
                     iter_time, testing_iterations, validation_configs, 
                     scene, gaussians_group, scheduler)
             
-            if ((i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH) and (iteration <= opt.densify_until_iter)):
+            if ENABLE_REPARTITION and ((i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH) and (iteration <= opt.densify_until_iter)):
                 t0 = time.time()
                 logger.info('before resplit\n' + gaussians_group.get_info())
                 new_path2bvh_nodes, new_sorted_leaf_nodes, new_tree_str, dst_model2box, dst_model2rank, dst_local_model_ids, dst_id2msgs = psd.eval_load_and_divide_grid_dist(
@@ -724,7 +742,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     logger.info('final_metric {}'.format(final_metric))
 
 def eval(
-         tb_writer, logger:logging.Logger, iteration:int, Ll1:torch.tensor, loss:torch.tensor, batch_size:int,
+        tb_writer, logger:logging.Logger, iteration:int, Ll1:torch.tensor, loss:torch.tensor, batch_size:int,
         l1_loss:callable, render_func:callable, modelId2rank:dict, local_func_blender:callable,
         elapsed: float, testing_iterations: list, validation_configs:dict, 
         scene: SceneV3, gaussians_group: BoundedGaussianModelGroup, scheduler:psd.BasicSchedulerwithDynamicSpace
@@ -810,6 +828,7 @@ def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, 
     mp_setup(rank, world_size, LOCAL_RANK, MASTER_ADDR, MASTER_PORT)
     dataset_args = train_args[1]
     tb_writer, logger = prepare_output_and_logger(dataset_args, train_args)
+    grid_setup(train_args[0], logger)
     try:
         training(*train_args, (tb_writer, logger))
     except:
@@ -829,8 +848,18 @@ if __name__ == "__main__":
     parser.add_argument("--ply_iteration", type=int, default=-1)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    # grid parameters
+    parser.add_argument("--ENABLE_REPARTITION", action='store_true', default=False)
+    parser.add_argument("--EVAL_PSNR_INTERVAL", type=int, default=8)
+    parser.add_argument("--Z_NEAR", type=float, default=0.01)
+    parser.add_argument("--Z_FAR", type=float, default=1000)
+    parser.add_argument("--EVAL_INTERVAL_EPOCH", type=int, default=5)
+    parser.add_argument("--SAVE_INTERVAL_EPOCH", type=int, default=5)
+    parser.add_argument("--SAVE_INTERVAL_ITER", type=int, default=50000)
+    parser.add_argument("--SKIP_PRUNE_AFTER_RESET", type=int, default=3000)
+    parser.add_argument("--SKIP_SPLIT", action='store_true', default=True)
+    parser.add_argument("--SKIP_CLONE", action='store_true', default=True)
 
     args = parser.parse_args(sys.argv[1:])
 

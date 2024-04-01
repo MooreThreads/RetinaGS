@@ -51,15 +51,15 @@ CAMERA_MODEL_IDS = dict([(camera_model.model_id, camera_model)
                          for camera_model in CAMERA_MODELS])
 
 class TransData(Dataset):
-    def __init__(self, path, out_img_path, downsample_scale) -> None:
+    def __init__(self, path, out_img_path, downsample_scale, split='train') -> None:
         super().__init__()
         self.path = path
         self.out_img_path = out_img_path
         self.downsample_scale = downsample_scale
 
         self.coordinates_path = os.path.join(path, 'coordinates.pt')
-        self.train_meta_dir = os.path.join(path, 'train/metadata')
-        self.train_rgbs_dir = os.path.join(path, 'train/rgbs')
+        self.train_meta_dir = os.path.join(path, split, 'metadata')
+        self.train_rgbs_dir = os.path.join(path, split, 'rgbs')
 
         info = torch.load(self.coordinates_path)
         self.origin_drb = info['origin_drb']
@@ -311,10 +311,10 @@ def colmap_2_mega(image: Image, camera:Camera, origin_drb, pose_scale_factor):
 
 
 if __name__ == "__main__":
-    path = '/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/raw/Mill_19/building-pixsfm'
+    path = '/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/raw/Mill_19/rubble-pixsfm'
     out_path = os.path.join('/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/',
-                        'colmap', 'Mill_19/building-pixsfm')
-    out_model_path = os.path.join(out_path, 'manual')
+                        'colmap', 'Mill_19/rubble-pixsfm/')
+    out_model_path = os.path.join(out_path, 'sparse')
     out_img_path = os.path.join(out_path, 'images')
     downsample_scale = 0.25
     
@@ -331,7 +331,7 @@ if __name__ == "__main__":
     def get_batch(cameras):
         return list(cameras)
     
-    dataset = TransData(path, out_img_path, downsample_scale)
+    dataset = TransData(path, out_img_path, downsample_scale, split='train')
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=32, 
                             collate_fn=get_batch)
     cameras, images = [], []

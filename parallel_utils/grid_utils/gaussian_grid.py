@@ -84,7 +84,8 @@ def build_func_blender(final_background:torch.tensor, logger: logging.Logger):
         accum_depth = (cated_tsprt * cated_depth).sum(dim=0, keepdim=True)
         accum_image = (cated_tsprt.unsqueeze(1) * cated_image).sum(dim=0, keepdim=False)    # (num_img,1,H,W)*(num_img,c,H,W).sum(dim=0, keepdim=False)
 
-        accum_image_with_bkg = accum_image + final_background.view(-1,1,1) * _cated_tsprt[-1].unsqueeze(0)
+        bkg_color = final_background if final_background is not None else torch.rand((3), device="cuda")
+        accum_image_with_bkg = accum_image + bkg_color.view(-1,1,1) * _cated_tsprt[-1].unsqueeze(0)
 
         blender_ret = {"render":accum_image_with_bkg, "depth":accum_depth, "alpha":accum_alpha}
         return blender_ret

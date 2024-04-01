@@ -37,7 +37,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = SimpleScene(dataset)
+    scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     gaussians.training_setup(opt)
     if checkpoint:
@@ -119,6 +119,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                         gaussians.reset_opacity()
 
+                    tb_writer.add_scalar('total_points', gaussians.get_xyz.shape[0], iteration)
+                    
                 # Optimizer step
                 if iteration < opt.iterations:
                     gaussians.optimizer.step()
@@ -206,6 +208,8 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
+    args.test_iterations.append(args.iterations)
+    args.checkpoint_iterations.append(args.iterations)
     
     print("Optimizing " + args.model_path)
 

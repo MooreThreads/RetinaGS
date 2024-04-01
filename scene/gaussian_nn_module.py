@@ -708,15 +708,21 @@ class BoundedGaussianModel(GaussianModel2):
             state_info = 'len state: {}'.format(len(self.optimizer.state))
         return model_info + '\n' + opti_info + '\n' + state_info
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, skip_prune=False):
+    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, skip_prune=False, skip_clone=False, skip_split=False):
         if (self.max_size is not None) and self._xyz.shape[0] > self.max_size:
             print('current shape {} is larger than {}, skip densify'.format(self._xyz.shape[0], self.max_size))
         else:
             grads = self.xyz_gradient_accum / self.denom
             grads[grads.isnan()] = 0.0
-
-            self.densify_and_clone(grads, max_grad, extent)
-            self.densify_and_split(grads, max_grad, extent)
+            if not skip_clone:
+                self.densify_and_clone(grads, max_grad, extent)
+            if not skip_split:    
+                self.densify_and_split(grads, max_grad, extent)
+            # add extra postfix in case of skip_clone=skip_split=True
+            if skip_split and skip_clone:
+                self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
+                self.denom = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
+                self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device)   
 
         if not skip_prune:    
             prune_mask = (self.get_opacity < min_opacity).squeeze()

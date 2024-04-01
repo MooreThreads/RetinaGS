@@ -81,3 +81,17 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 3. The implementation of the new feature of diff-gaussian-rasterization, directly mounted to the rasterization_kernels folder.
 
+# Custom Dataset
+## Mill_19
+as Mill_19 provide train/val set, we just follow its original division
+do remember to config the path in scripts/mega_nerf_to_colmap.py to process data and organize files
+so that SimpleScene would recongnize them
+'''
+example structure:
+--path/to/model
+    |--images/ (train images)
+    |--sparse/0/ (colmap model)
+    |--test
+        |--images (test images)
+        |--sparse/cameras.txt and images.txt
+'''
