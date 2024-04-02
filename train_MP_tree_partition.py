@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.distributed import init_process_group, destroy_process_group
+import torchvision
 
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -26,6 +27,7 @@ from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelG
 from scene.cameras import Camera, EmptyCamera, ViewMessage
 from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
 from scene.scene4bounded_gaussian import SceneV3
+from lpipsPyTorch import LPIPS
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -47,17 +49,26 @@ SAVE_INTERVAL_ITER = 50000
 SKIP_PRUNE_AFTER_RESET = 3000
 SKIP_SPLIT = True
 SKIP_CLONE = True
+PERCEPTION_LOSS = False
+CNN_IMAGE = None
+
 def grid_setup(args, logger:logging.Logger):
-    ENABLE_REPARTITION = args.ENABLE_REPARTITION
-    EVAL_PSNR_INTERVAL = args.EVAL_PSNR_INTERVAL
-    Z_NEAR = args.Z_NEAR
-    Z_FAR = args.Z_FAR
-    EVAL_INTERVAL_EPOCH = args.EVAL_INTERVAL_EPOCH
-    SAVE_INTERVAL_EPOCH = args.SAVE_INTERVAL_EPOCH
-    SAVE_INTERVAL_ITER = args.SAVE_INTERVAL_ITER
-    SKIP_PRUNE_AFTER_RESET = args.SKIP_PRUNE_AFTER_RESET
-    SKIP_SPLIT = args.SKIP_SPLIT
-    SKIP_CLONE = args.SKIP_CLONE
+    global ENABLE_REPARTITION; ENABLE_REPARTITION = args.ENABLE_REPARTITION
+    global EVAL_PSNR_INTERVAL; EVAL_PSNR_INTERVAL = args.EVAL_PSNR_INTERVAL
+    global Z_NEAR; Z_NEAR = args.Z_NEAR
+    global Z_FAR; Z_FAR = args.Z_FAR
+    global EVAL_INTERVAL_EPOCH; EVAL_INTERVAL_EPOCH= args.EVAL_INTERVAL_EPOCH
+    global SAVE_INTERVAL_EPOCH; SAVE_INTERVAL_EPOCH = args.SAVE_INTERVAL_EPOCH
+    global SAVE_INTERVAL_ITER; SAVE_INTERVAL_ITER = args.SAVE_INTERVAL_ITER
+    global SKIP_PRUNE_AFTER_RESET; SKIP_PRUNE_AFTER_RESET = args.SKIP_PRUNE_AFTER_RESET
+    global SKIP_SPLIT; SKIP_SPLIT = args.SKIP_SPLIT
+    global SKIP_CLONE; SKIP_CLONE = args.SKIP_CLONE
+    global PERCEPTION_LOSS; PERCEPTION_LOSS = args.PERCEPTION_LOSS
+    global CNN_IMAGE
+    if PERCEPTION_LOSS:
+        CNN_IMAGE = LPIPS(net_type = 'alex', version = '0.1').to('cuda')
+        logger.info("PERCEPTION_LOSS is ENABLED")
+    logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE))    
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -331,6 +342,9 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
         Ll1 = l1_loss(image, gt_image)
 
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        if PERCEPTION_LOSS:
+            assert CNN_IMAGE is not None
+            loss = (1-opt.lambda_perception)*loss + opt.lambda_perception * torch.sum(CNN_IMAGE(image, gt_image))
         loss_dict[k] = loss
                 
         loss_main_rank += loss
@@ -858,8 +872,9 @@ if __name__ == "__main__":
     parser.add_argument("--SAVE_INTERVAL_EPOCH", type=int, default=5)
     parser.add_argument("--SAVE_INTERVAL_ITER", type=int, default=50000)
     parser.add_argument("--SKIP_PRUNE_AFTER_RESET", type=int, default=3000)
-    parser.add_argument("--SKIP_SPLIT", action='store_true', default=True)
-    parser.add_argument("--SKIP_CLONE", action='store_true', default=True)
+    parser.add_argument("--SKIP_SPLIT", action='store_true', default=False)
+    parser.add_argument("--SKIP_CLONE", action='store_true', default=False)
+    parser.add_argument("--PERCEPTION_LOSS", action='store_true', default=False)
 
     args = parser.parse_args(sys.argv[1:])
 

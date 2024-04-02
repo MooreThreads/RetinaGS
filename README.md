@@ -73,6 +73,11 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 [ITER 30107] Evaluating train: PSNR 28.23
 
+default parameters get worse result with bigger batchsize, if you just set batchsize=1(this also leads to low efficiency) num_gpu=2, num_model=4:
+[ITER 29946] Evaluating test: L1 0.028083428197229903 PSNR 27.158511241277058
+
+[ITER 29946] Evaluating train: L1 0.02086768550798297 PSNR 29.720123386383058
+
 # Organizational Reformations
 
 1. gaussian_renderer/__init__.py and scene/__init__.py have no additional implementation functionality. New implementation class should be a separate py file. 
