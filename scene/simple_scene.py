@@ -44,7 +44,7 @@ class SimpleScene:
 
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval, args.pointcloud_sample_rate)
+            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
         else:
             assert False, "Could not recognize scene type!"
 

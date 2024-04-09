@@ -481,7 +481,7 @@ def readNerfSyntheticInfo(path, white_background, eval, pointcloud_sample_rate=1
                            ply_path=ply_path)
     return scene_info
 
-def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud_sample_rate=1, extension=""):
+def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud_sample_rate=1, points3D="points3d", extension=""):
     print("Reading Training Transforms")
     train_cam_infos = readEmptyCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
@@ -493,7 +493,7 @@ def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "points3d.ply")
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
     if not os.path.exists(ply_path):
         # Since this data set has no colmap data, we start with random points
         num_pts = 100_000
