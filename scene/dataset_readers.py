@@ -305,7 +305,7 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, 
                            ply_path=None)
     return scene_info
 
-def readCustomMill19CameraInfo(path, points3D="points3D"):
+def readCustomMill19CameraInfo(path, pointcloud_sample_rate=1, points3D="points3D"):
     test_cam_extrinsic_file = os.path.join(path, "test/sparse", "images.txt")
     test_cam_intrinsic_file = os.path.join(path, "test/sparse", "cameras.txt")
     test_extrinsics = read_extrinsics_text(test_cam_extrinsic_file)
@@ -345,7 +345,7 @@ def readCustomMill19CameraInfo(path, points3D="points3D"):
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 
