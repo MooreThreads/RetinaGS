@@ -84,12 +84,19 @@ def build_func_blender(final_background:torch.tensor, logger: logging.Logger):
         accum_depth = (cated_tsprt * cated_depth).sum(dim=0, keepdim=True)
         accum_image = (cated_tsprt.unsqueeze(1) * cated_image).sum(dim=0, keepdim=False)    # (num_img,1,H,W)*(num_img,c,H,W).sum(dim=0, keepdim=False)
 
-        accum_image_with_bkg = accum_image + final_background.view(-1,1,1) * _cated_tsprt[-1].unsqueeze(0)
+        bkg_color = final_background if final_background is not None else torch.rand((3), device="cuda")
+        accum_image_with_bkg = accum_image + bkg_color.view(-1,1,1) * _cated_tsprt[-1].unsqueeze(0)
 
         blender_ret = {"render":accum_image_with_bkg, "depth":accum_depth, "alpha":accum_alpha}
         return blender_ret
 
     return local_func_blender
+
+
+def init_grid(scene: SceneV3, SCENE_GRID_SIZE: int):
+    _SPACE_RANGE_LOW, _SPACE_RANGE_UP = scene.point_cloud.points.min(axis=0, keepdims=False), scene.point_cloud.points.max(axis=0, keepdims=False)
+    _VOXEL_SIZE = (_SPACE_RANGE_UP - _SPACE_RANGE_LOW)/SCENE_GRID_SIZE - 1e-7
+    return _SPACE_RANGE_LOW, _SPACE_RANGE_UP, _VOXEL_SIZE
 
 def init_grid_dist(scene: SceneV3, SCENE_GRID_SIZE: int):
     RANK = dist.get_rank()
@@ -105,6 +112,20 @@ def init_grid_dist(scene: SceneV3, SCENE_GRID_SIZE: int):
     grid_numpy = grid_tensor.cpu().numpy()
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = grid_numpy[0], grid_numpy[1], grid_numpy[2]
     return SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE
+
+def load_grid(scene:SceneV3, ply_iteration:int, SCENE_GRID_SIZE: int):
+    RANK = 0
+    model_path = scene.model_path
+    point_cloud_path = os.path.join(model_path, "point_cloud/iteration_{}".format(ply_iteration))
+    tree_path = os.path.join(point_cloud_path, "tree_{}.txt".format(RANK))
+
+    _SPACE_RANGE_LOW, _SPACE_RANGE_UP, UNUSED_GRID_SIZE, path2node_info_dict = ppu.load_BvhTree_on_3DGrid(tree_path)
+    _VOXEL_SIZE = (_SPACE_RANGE_UP - _SPACE_RANGE_LOW)/SCENE_GRID_SIZE - 1e-7
+    grid_np = np.array([_SPACE_RANGE_LOW, _SPACE_RANGE_UP, _VOXEL_SIZE])
+    grid_tensor = torch.tensor(grid_np, dtype=torch.float32, device='cuda')
+    grid_numpy = grid_tensor.cpu().numpy()
+    SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = grid_numpy[0], grid_numpy[1], grid_numpy[2]
+    return SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict
 
 def load_grid_dist(scene:SceneV3, ply_iteration:int, SCENE_GRID_SIZE: int):
     RANK = dist.get_rank()
@@ -171,6 +192,31 @@ def assign_model2rank_dist(num_model):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
     model2rank = {i: i%WORLD_SIZE for i in range(num_model)}
     return model2rank
+
+def init_GS_model_division(all_leaf_node:list, logger:logging.Logger):
+    # all_leaf_node: list of BvhTreeNodeon3DGrid
+    RANK, WORLD_SIZE = 0, 1
+    num_models_tensor = torch.tensor(len(all_leaf_node), dtype=torch.int, device='cuda')
+    num_model = int(num_models_tensor) 
+
+    models_range_tensor = torch.tensor([node.range_low + node.range_up for node in all_leaf_node], dtype=torch.int, device='cuda')
+    models_range = models_range_tensor.cpu().numpy()
+
+    model2box = {i: ppu.BoxinGrid3D(models_range[i, 0:3], models_range[i, 3:6]) for i in range(num_model)}
+    # model2rank = assign_model2rank_dist(num_model=num_model)
+    model2rank = {i: 0 for i in range(num_model)}
+
+    logger.info(f'{num_model} models for {RANK} ranks')
+    str_model2box = '\n'.join([f'model {model}: {str(box)}' for model,box in model2box.items()])
+    logger.info(f'details about model space:\n{str_model2box}')
+
+    local_model_ids = [model for model,r in model2rank.items() if r==RANK]
+    local_model_ids.sort()
+    if len(local_model_ids) <= 0:
+        logger.error(f'find not model for current rank {RANK}!')
+        raise RuntimeError('empty rank')
+
+    return model2box, model2rank, local_model_ids
 
 def init_GS_model_division_dist(all_leaf_node:list, logger:logging.Logger):
     # all_leaf_node: list of BvhTreeNodeon3DGrid

@@ -54,6 +54,7 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
+        self.points3D = "points3D"
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -87,6 +88,7 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
+        self.lambda_perception = 0.15
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
