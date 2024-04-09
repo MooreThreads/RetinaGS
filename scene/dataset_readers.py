@@ -217,7 +217,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
-def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8):
+def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="points3D"):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -242,9 +242,9 @@ def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8):
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/points3D.ply")
-    bin_path = os.path.join(path, "sparse/0/points3D.bin")
-    txt_path = os.path.join(path, "sparse/0/points3D.txt")
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    bin_path = os.path.join(path, "sparse/0/{}.bin".format(points3D))
+    txt_path = os.path.join(path, "sparse/0/{}.txt".format(points3D))
     if not os.path.exists(ply_path):
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:
@@ -296,7 +296,7 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, llffhold=8):
                            ply_path=None)
     return scene_info
 
-def readCustomMill19CameraInfo(path):
+def readCustomMill19CameraInfo(path, points3D="points3D"):
     test_cam_extrinsic_file = os.path.join(path, "test/sparse", "images.txt")
     test_cam_intrinsic_file = os.path.join(path, "test/sparse", "cameras.txt")
     test_extrinsics = read_extrinsics_text(test_cam_extrinsic_file)
@@ -325,9 +325,9 @@ def readCustomMill19CameraInfo(path):
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/points3D.ply")
-    bin_path = os.path.join(path, "sparse/0/points3D.bin")
-    txt_path = os.path.join(path, "sparse/0/points3D.txt")
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    bin_path = os.path.join(path, "sparse/0/{}.bin".format(points3D))
+    txt_path = os.path.join(path, "sparse/0/{}.txt".format(points3D))
     if not os.path.exists(ply_path):
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:

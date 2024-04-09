@@ -40,6 +40,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     gaussians.training_setup(opt)
+    print('spatial_lr_scale is {}'.format(gaussians.spatial_lr_scale))
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)

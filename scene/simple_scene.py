@@ -33,10 +33,10 @@ class SimpleScene:
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
             if not os.path.exists(os.path.join(args.source_path, "test")):
-                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval)
+                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, points3D=args.points3D)
             else:
                 print('find test/ folder, assuming Mill_19 data set!')
-                scene_info = readCustomMill19CameraInfo(args.source_path)
+                scene_info = readCustomMill19CameraInfo(args.source_path, points3D=args.points3D)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval)

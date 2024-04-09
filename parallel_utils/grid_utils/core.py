@@ -206,13 +206,17 @@ def densification(iteration, batch_size, skip_prune:bool, skip_clone:bool, skip_
                 tb_writer.add_scalar('cnt/densify_and_prune', t1-t0, iteration) 
 
 def reset_opacity(iteration, batch_size, opt, dataset_arg, gaussians_group:BoundedGaussianModelGroup, tb_writer, logger:logging.Logger):
+    try:
+        RANK = dist.get_rank()
+    except:
+        RANK = -1    
     if iteration < opt.densify_until_iter: 
         if is_interval_in_batch(iteration, batch_size, opt.opacity_reset_interval) or \
             (dataset_arg.white_background and is_point_in_batch(iteration, batch_size, opt.densify_from_iter)):
             for model_id in gaussians_group.model_id_list:
                 _gaussians:BoundedGaussianModel = gaussians_group.get_model(model_id)
                 _gaussians.reset_opacity()
-            logger.info('rank {} has reset opacity at iteration {}'.format(dist.get_rank(), iteration))
+            logger.info('rank {} has reset opacity at iteration {}'.format(RANK, iteration))
 
         return True
     return False 

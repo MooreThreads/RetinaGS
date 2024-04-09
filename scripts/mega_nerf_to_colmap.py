@@ -51,7 +51,7 @@ CAMERA_MODEL_IDS = dict([(camera_model.model_id, camera_model)
                          for camera_model in CAMERA_MODELS])
 
 class TransData(Dataset):
-    def __init__(self, path, out_img_path, downsample_scale, split='train') -> None:
+    def __init__(self, path, out_img_path, downsample_scale, split='train', normalized=False) -> None:
         super().__init__()
         self.path = path
         self.out_img_path = out_img_path
@@ -60,14 +60,28 @@ class TransData(Dataset):
         self.coordinates_path = os.path.join(path, 'coordinates.pt')
         self.train_meta_dir = os.path.join(path, split, 'metadata')
         self.train_rgbs_dir = os.path.join(path, split, 'rgbs')
+        self.normalized = normalized
 
         info = torch.load(self.coordinates_path)
-        self.origin_drb = info['origin_drb']
-        self.pose_scale_factor = info['pose_scale_factor']
+        
+        if self.normalized:
+            self.pose_scale_factor = 1
+            self.origin_drb = info['origin_drb'] * 0
+        else:
+            self.pose_scale_factor = info['pose_scale_factor']
+            self.origin_drb = info['origin_drb']
 
-        self.train_images = glob.glob(
+        # millon_19 use .jpg
+        jpgs = glob.glob(
             os.path.join(self.train_rgbs_dir, '*.jpg')
         )
+
+        # sci-art use .JPG
+        JPGs = glob.glob(
+            os.path.join(self.train_rgbs_dir, '*.JPG')
+        )
+
+        self.train_images = jpgs + JPGs
 
 
     def __len__(self):
@@ -311,27 +325,48 @@ def colmap_2_mega(image: Image, camera:Camera, origin_drb, pose_scale_factor):
 
 
 if __name__ == "__main__":
-    path = '/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/raw/Mill_19/rubble-pixsfm'
-    out_path = os.path.join('/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/',
-                        'colmap', 'Mill_19/rubble-pixsfm/')
+    path = '/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/raw/Mill_19/building-pixsfm'
+    downsample_scale = 0.25
+    normalized = True
+
+    # process train_set
+    out_path = os.path.join('/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/colmap_norm/Mill_19/building-pixsfm')
+    out_path_train = out_path
     out_model_path = os.path.join(out_path, 'sparse')
     out_img_path = os.path.join(out_path, 'images')
-    downsample_scale = 0.25
-    
+
     os.makedirs(out_path, exist_ok=True)
     os.makedirs(out_model_path, exist_ok=True)
     os.makedirs(out_img_path, exist_ok=True)
-
-    # cameras, images = read_mega_nerf_dataset(
-    #     path,
-    #     out_img_path,
-    #     downsample_scale=downsample_scale)
 
     ## dataloader version
     def get_batch(cameras):
         return list(cameras)
     
-    dataset = TransData(path, out_img_path, downsample_scale, split='train')
+    dataset = TransData(path, out_img_path, downsample_scale, split='train', normalized=normalized)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=32, 
+                            collate_fn=get_batch)
+    cameras, images = [], []
+    for _i, data in tqdm(enumerate(dataloader)):
+        img_info, camera_info = data[0]
+        images.append(img_info)
+        cameras.append(camera_info)
+    
+    write_cameras_text(cameras=cameras, path=os.path.join(out_model_path, 'cameras.txt'))
+    write_images_text(images=images, path=os.path.join(out_model_path, 'images.txt'))
+    with open(os.path.join(out_model_path, 'points3D.txt'), 'w') as f:
+        pass
+
+    # process test_set
+    out_path = os.path.join(out_path_train, 'test')
+    out_model_path = os.path.join(out_path, 'sparse')
+    out_img_path = os.path.join(out_path, 'images')
+
+    os.makedirs(out_path, exist_ok=True)
+    os.makedirs(out_model_path, exist_ok=True)
+    os.makedirs(out_img_path, exist_ok=True)
+    
+    dataset = TransData(path, out_img_path, downsample_scale, split='val', normalized=normalized)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, drop_last=False, num_workers=32, 
                             collate_fn=get_batch)
     cameras, images = [], []
