@@ -145,12 +145,21 @@ def readColmapEmptyCameras(cam_extrinsics, cam_intrinsics, images_folder):
     sys.stdout.write('\n')
     return cam_infos
 
-def fetchPly(path):
+def fetchPly(path, pointcloud_sample_rate=1):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
     normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    if pointcloud_sample_rate != 1:
+        num_samples = int(positions.shape[0]/pointcloud_sample_rate)
+        sampled_indices = np.random.choice(positions.shape[0], num_samples, replace=False)
+        positions = positions[sampled_indices]
+        colors = colors[sampled_indices]
+        normals = normals[sampled_indices]
+        print("Random Sample Done!")
+        print(positions.shape)
+        
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -170,7 +179,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+def readColmapSceneInfo(path, images, eval, pointcloud_sample_rate=1, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -206,7 +215,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 
@@ -217,7 +226,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
-def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="points3D"):
+def readColmapSceneAndEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1,llffhold=8, points3D="points3D"):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -253,7 +262,7 @@ def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 
@@ -264,7 +273,7 @@ def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="
                            ply_path=ply_path)
     return scene_info
 
-def readColmapOnlyEmptyCameraInfo(path, images, eval, llffhold=8):
+def readColmapOnlyEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -296,7 +305,7 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, llffhold=8):
                            ply_path=None)
     return scene_info
 
-def readCustomMill19CameraInfo(path, points3D="points3D"):
+def readCustomMill19CameraInfo(path, pointcloud_sample_rate=1, points3D="points3D"):
     test_cam_extrinsic_file = os.path.join(path, "test/sparse", "images.txt")
     test_cam_intrinsic_file = os.path.join(path, "test/sparse", "cameras.txt")
     test_extrinsics = read_extrinsics_text(test_cam_extrinsic_file)
@@ -336,7 +345,7 @@ def readCustomMill19CameraInfo(path, points3D="points3D"):
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 
@@ -436,7 +445,7 @@ def readEmptyCamerasFromTransforms(path, transformsfile, white_background, exten
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, extension=""):
+def readNerfSyntheticInfo(path, white_background, eval, pointcloud_sample_rate=1, extension=""):
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
@@ -461,7 +470,7 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=""):
 
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 
@@ -472,7 +481,7 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=""):
                            ply_path=ply_path)
     return scene_info
 
-def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, extension=""):
+def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud_sample_rate=1, points3D="points3d", extension=""):
     print("Reading Training Transforms")
     train_cam_infos = readEmptyCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
@@ -484,7 +493,7 @@ def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, extension=
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "points3d.ply")
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
     if not os.path.exists(ply_path):
         # Since this data set has no colmap data, we start with random points
         num_pts = 100_000
@@ -497,7 +506,7 @@ def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, extension=
 
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
     try:
-        pcd = fetchPly(ply_path)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
     except:
         pcd = None
 

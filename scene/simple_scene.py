@@ -16,6 +16,9 @@ class SimpleScene:
         Compared with Scene, a SimpleScene only collects basic training info
         """
         self.model_path = args.model_path
+        self.scale_control_rate = args.scale_control_rate
+        self.pointcloud_sample_rate = args.pointcloud_sample_rate
+        self.opacity_init = args.opacity_init
         self.loaded_iter = None
 
         if load_iteration:
@@ -32,14 +35,16 @@ class SimpleScene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
+
             if not os.path.exists(os.path.join(args.source_path, "test")):
-                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, points3D=args.points3D)
+                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
             else:
                 print('find test/ folder, assuming Mill_19 data set!')
-                scene_info = readCustomMill19CameraInfo(args.source_path, points3D=args.points3D)
+                scene_info = readCustomMill19CameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
+
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval)
+            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -84,7 +89,7 @@ class SimpleScene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            gaussians.create_from_pcd(self.scene_info.point_cloud, self.cameras_extent)
+            gaussians.create_from_pcd(self.scene_info.point_cloud, self.cameras_extent, self.scale_control_rate, self.opacity_init)
     
     @staticmethod
     def get_batch(cameras):

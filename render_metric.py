@@ -35,9 +35,11 @@ def render_wrapper(viewpoint_cam, gaussians, pipe, background):
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_step, full_dict, per_view_dict):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
+    residual_path = os.path.join(model_path, name, "ours_{}".format(iteration), "residual")
 
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
+    makedirs(residual_path, exist_ok=True)
     
     full_dict[name] = {}
     per_view_dict[name] = {}
@@ -92,12 +94,15 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         if save_step != -1 and idx % save_step == 0:
             torchvision.utils.save_image(rendering, os.path.join(render_path, view.image_name + ".png"))
             torchvision.utils.save_image(gt, os.path.join(gts_path, view.image_name + ".png"))
+            residual = torch.abs(gt-rendering)
+            torchvision.utils.save_image(residual, os.path.join(residual_path, view.image_name + ".png"))            
         
         per_view_dict[name][view.image_name] = {
                                                 "LPIPS": lpips_image.item(),                                                                        
                                                 "SSIM": ssim_image.item(),
                                                 "PSNR": psnr_image.item(),
                                                 "GSPI": GSPI_image,
+                                                "GSPP": cnt_GS.sum().item()/(rendering.numel()/3),
                                                 "MAPP": cnt_MA.sum().item()                                              
                                                 }
         
@@ -106,12 +111,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                             "Mean of LPIPS": cnt_lpips/num_image,
                             "Mean of LPIPS": cnt_lpips/num_image,
                             "Mean of GSPI": cnt_GSPI/num_image,
+                            "Mean of GSPP": cnt_GSPP/num_pixel,
                             "Mean of MAPP": cnt_MAPP/num_pixel,
+                            "GS": num_GS,
                             "AGSR": AGS_mask.sum().item()/num_GS,
                             "AT": cnt_GSPP/num_GS})
 
     if num_pixel > 0:
-       print(name + ": Mean of SSIM {}, Mean of PSNR {}, Mean of LPIPS {}, Mean of GSPI {}, GSPP {}, MAPP {}, AGSR {}, AT {}".format(
+       print(name + ": Mean of SSIM {}, Mean of PSNR {}, Mean of LPIPS {}, Mean of GSPI {}, Mean of GSPP {}, Mean of MAPP {}, AGSR {}, AT {}".format(
              cnt_ssim/num_image, cnt_psnr/num_image, cnt_lpips/num_image, cnt_GSPI/num_image, cnt_GSPP/num_pixel, cnt_MAPP/num_pixel, AGS_mask.sum().item()/num_GS, cnt_GSPP/num_GS
              ))
     else:
