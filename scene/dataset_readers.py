@@ -179,7 +179,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, pointcloud_sample_rate, llffhold=8):
+def readColmapSceneInfo(path, images, eval, pointcloud_sample_rate=1, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -226,11 +226,7 @@ def readColmapSceneInfo(path, images, eval, pointcloud_sample_rate, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
-<<<<<<< HEAD
-def readColmapSceneAndEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, llffhold=8):
-=======
-def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="points3D"):
->>>>>>> origin/main
+def readColmapSceneAndEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1,llffhold=8, points3D="points3D"):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -449,7 +445,7 @@ def readEmptyCamerasFromTransforms(path, transformsfile, white_background, exten
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, pointcloud_sample_rate, extension=""):
+def readNerfSyntheticInfo(path, white_background, eval, pointcloud_sample_rate=1, extension=""):
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
