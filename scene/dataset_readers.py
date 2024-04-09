@@ -226,7 +226,11 @@ def readColmapSceneInfo(path, images, eval, pointcloud_sample_rate, llffhold=8):
                            ply_path=ply_path)
     return scene_info
 
+<<<<<<< HEAD
 def readColmapSceneAndEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, llffhold=8):
+=======
+def readColmapSceneAndEmptyCameraInfo(path, images, eval, llffhold=8, points3D="points3D"):
+>>>>>>> origin/main
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -251,9 +255,9 @@ def readColmapSceneAndEmptyCameraInfo(path, images, eval, pointcloud_sample_rate
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/points3D.ply")
-    bin_path = os.path.join(path, "sparse/0/points3D.bin")
-    txt_path = os.path.join(path, "sparse/0/points3D.txt")
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    bin_path = os.path.join(path, "sparse/0/{}.bin".format(points3D))
+    txt_path = os.path.join(path, "sparse/0/{}.txt".format(points3D))
     if not os.path.exists(ply_path):
         print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
         try:
@@ -303,6 +307,57 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, 
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=None)
+    return scene_info
+
+def readCustomMill19CameraInfo(path, points3D="points3D"):
+    test_cam_extrinsic_file = os.path.join(path, "test/sparse", "images.txt")
+    test_cam_intrinsic_file = os.path.join(path, "test/sparse", "cameras.txt")
+    test_extrinsics = read_extrinsics_text(test_cam_extrinsic_file)
+    test_intrinsics = read_intrinsics_text(test_cam_intrinsic_file)
+    reading_dir = "test/images" 
+    test_cam_infos_unsorted = readColmapEmptyCameras(cam_extrinsics=test_extrinsics, cam_intrinsics=test_intrinsics, images_folder=os.path.join(path, reading_dir))
+    test_cam_infos = sorted(test_cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    try:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
+    reading_dir = "images" 
+    cam_infos_unsorted = readColmapEmptyCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    train_cam_infos = cam_infos
+    # test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    bin_path = os.path.join(path, "sparse/0/{}.bin".format(points3D))
+    txt_path = os.path.join(path, "sparse/0/{}.txt".format(points3D))
+    if not os.path.exists(ply_path):
+        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+        try:
+            xyz, rgb, _ = read_points3D_binary(bin_path)
+        except:
+            xyz, rgb, _ = read_points3D_text(txt_path)
+        storePly(ply_path, xyz, rgb)
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
     return scene_info
 
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=""):

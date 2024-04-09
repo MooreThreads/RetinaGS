@@ -181,7 +181,7 @@ def update_densification_stat(iteration, opt, gaussians_group:BoundedGaussianMod
             _gaussians:BoundedGaussianModel = gaussians_group.get_model(model_id)
             _gaussians.xyz_gradient_accum += _gaussians._means2D_meta.grad
 
-def densification(iteration, batch_size, skip_prune:bool, opt, scene:SceneV3, gaussians_group:BoundedGaussianModelGroup, tb_writer, logger:logging.Logger):
+def densification(iteration, batch_size, skip_prune:bool, skip_clone:bool, skip_split:bool, opt, scene:SceneV3, gaussians_group:BoundedGaussianModelGroup, tb_writer, logger:logging.Logger):
     # Keep track of max radii in image-space for pruning
     # update max_radii and denom by each render_task while update xyz_gradient_accum just once
     # visibility_filter/radii is part of each independent forward_render_ret 
@@ -192,8 +192,9 @@ def densification(iteration, batch_size, skip_prune:bool, opt, scene:SceneV3, ga
             size_threshold = 20 if iteration > opt.opacity_reset_interval else None
             for model_id in gaussians_group.model_id_list:
                 _gaussians:BoundedGaussianModel = gaussians_group.get_model(model_id)
-                logger.info('skip_prune is {} at iteration {}'.format(skip_prune, iteration))
-                _gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, skip_prune=skip_prune)
+                logger.info('skip_prune is {}, skip_clone is {}, skip_split is {} at iteration {}'.format(skip_prune, skip_clone, skip_split, iteration))
+                _gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold, 
+                                             skip_prune=skip_prune, skip_clone=skip_clone, skip_split=skip_split)
                 gaussians_shape = torch.zeros((1, ), dtype=torch.int64, device='cuda')
                 gaussians_shape[0] = _gaussians._xyz.shape[0]
                 logger.info("model {} update to size {} at iteration {}".format(model_id, _gaussians._xyz.shape[0], iteration))
@@ -205,32 +206,24 @@ def densification(iteration, batch_size, skip_prune:bool, opt, scene:SceneV3, ga
                 tb_writer.add_scalar('cnt/densify_and_prune', t1-t0, iteration) 
 
 def reset_opacity(iteration, batch_size, opt, dataset_arg, gaussians_group:BoundedGaussianModelGroup, tb_writer, logger:logging.Logger):
+    try:
+        RANK = dist.get_rank()
+    except:
+        RANK = -1    
     if iteration < opt.densify_until_iter: 
         if is_interval_in_batch(iteration, batch_size, opt.opacity_reset_interval) or \
             (dataset_arg.white_background and is_point_in_batch(iteration, batch_size, opt.densify_from_iter)):
             for model_id in gaussians_group.model_id_list:
                 _gaussians:BoundedGaussianModel = gaussians_group.get_model(model_id)
                 _gaussians.reset_opacity()
-            logger.info('rank {} has reset opacity at iteration {}'.format(dist.get_rank(), iteration))
+            logger.info('rank {} has reset opacity at iteration {}'.format(RANK, iteration))
 
         return True
     return False 
 
-def find_ply_iteration(scene:SceneV3, logger:logging.Logger):
-    model_path = scene.model_path
-    # model_id = 0
-    point_cloud_path = os.path.join(model_path, "point_cloud/iteration_*")
-    # tree_path = os.path.join(point_cloud_path, "tree_{}.txt".format(model_id))
-    all_ckpt_dir = glob.glob(point_cloud_path)
-    try:
-        all_ply_iteration = [int(os.path.basename(path).split('_')[-1]) for path in all_ckpt_dir]
-        final_iteration = max(all_ply_iteration)
-        logger.info('find ckpt at iteration {}'.format(final_iteration))
-    except:
-        final_iteration = -1
-        logger.info('can not find ckpt')    
-    return final_iteration
-
+# reasons for why we store GS in .ply and its optimizer in .pt:
+# 1. in MP training, you may find the ckpts so large that you want to discard some content
+# 2. momentums in optimizer are actually not very important for GS model
 def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model_ids:list, scene:SceneV3, ply_iteration:int, logger:logging.Logger):
     model_path:str = scene.model_path
     
@@ -243,7 +236,14 @@ def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model
         _gau:BoundedGaussianModel = gaussians_group.get_model(mid)
         _ply_path = os.path.join(point_cloud_path, "point_cloud_{}.ply".format(mid))
         ply_path = glob.glob(_ply_path)[-1]
+
         _gau.load_ply(ply_path)
+        # this setup is necassary even optimizer would load lr from .pt
+        # we must set it as GS update some lr with get_expon_lr_func
+        # you can just consider load_ply + set spatial_lr_scale = create_from_pcd
+        _gau.spatial_lr_scale = scene.cameras_extent 
+        logger.info('set _gau.spatial_lr_scale as {}'.format(_gau.spatial_lr_scale))
+
         # build optimizer
         _gau.training_setup(opt)
         # load optimizer state_dict
@@ -254,7 +254,6 @@ def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model
         else:
             logger.info('find no adam optimizer')
 
-        _gau.spatial_lr_scale = scene.cameras_extent
         logger.info('load from {}'.format(ply_path))
         
     gaussians_group.set_SHdegree(ply_iteration//1000)   

@@ -51,11 +51,11 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 1. train.py: 
 
-47min31s
+33min25s
 
 [ITER 30000] Evaluating all of test: PSNR 27.28
 
-[ITER 30000] Evaluating all of train: PSNR 29.87
+[ITER 30000] Evaluating all of train: PSNR 30.00
 
 2. train_with_dataset.py: 
 
@@ -73,6 +73,11 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 [ITER 30107] Evaluating train: PSNR 28.23
 
+default parameters get worse result with bigger batchsize, if you just set batchsize=1(this also leads to low efficiency) num_gpu=2, num_model=4:
+[ITER 29946] Evaluating test: L1 0.028083428197229903 PSNR 27.158511241277058
+
+[ITER 29946] Evaluating train: L1 0.02086768550798297 PSNR 29.720123386383058
+
 # Organizational Reformations
 
 1. gaussian_renderer/__init__.py and scene/__init__.py have no additional implementation functionality. New implementation class should be a separate py file. 
@@ -81,3 +86,17 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 3. The implementation of the new feature of diff-gaussian-rasterization, directly mounted to the rasterization_kernels folder.
 
+# Custom Dataset
+## Mill_19
+as Mill_19 provide train/val set, we just follow its original division
+do remember to config the path in scripts/mega_nerf_to_colmap.py to process data and organize files
+so that SimpleScene would recongnize them
+'''
+example structure:
+--path/to/model
+    |--images/ (train images)
+    |--sparse/0/ (colmap model)
+    |--test
+        |--images (test images)
+        |--sparse/cameras.txt and images.txt
+'''
