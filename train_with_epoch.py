@@ -29,7 +29,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = SimpleScene(dataset, load_iteration=-1)
+    # scene = SimpleScene(dataset, load_iteration=-1)
+    scene = SimpleScene(dataset)
     scene.load2gaussians(gaussians)
     train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()    
     opt.position_lr_max_steps = opt.epochs * len(train_dataset) # Auto update max steps
