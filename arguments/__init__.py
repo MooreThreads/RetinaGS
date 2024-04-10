@@ -106,7 +106,11 @@ class OptimizationParams(ParamGroup):
         self.densify_until_epoch = 200
         self.save_epoch_interval = -1
         self.eval_epoch_interval = 10
+        self.visualization_epoch_interval = 100
+        self.number_visualization = 5
         self.max_gaussians = 40_000_000
+        self.scales_reg_enable = False
+        self.scales_reg_lr = 0.01
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

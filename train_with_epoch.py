@@ -74,12 +74,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             bg = torch.rand((3), device="cuda") if opt.random_background else background
 
             render_pkg = render_wrapper(viewpoint_cam, gaussians, pipe, bg)
-            image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            image, viewspace_point_tensor, visibility_filter, radii, scales = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"], render_pkg["scales"]
 
             # Loss
             gt_image = viewpoint_cam.original_image.cuda()
             Ll1 = l1_loss(image, gt_image)
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            
+            if opt.scales_reg_enable:
+                scales_reg = scales.prod(dim=1).mean()
+                loss += opt.scales_reg_lr * scales_reg
+                
             loss.backward()
 
             iter_end.record()
@@ -120,7 +125,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         with torch.no_grad():
             if epoch % opt.eval_epoch_interval == 0:            
-                training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
+                training_report_epoch(tb_writer, opt, epoch, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
                 
             if opt.save_epoch_interval == -1 :
                 if epoch == opt.epochs:                
@@ -161,7 +166,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
         if iteration % 100 == 0:
             tb_writer.add_scalar('total_points', gaussians.get_xyz.shape[0], iteration)
         
-def training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
+def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
     # Report test and 1/8 of training set
     torch.cuda.empty_cache()
     train_dataset = scene.getTrainCameras()
@@ -175,10 +180,10 @@ def training_report_epoch(tb_writer, epoch, Ll1, loss, l1_loss, elapsed, testing
                 render_pkg = renderFunc(viewpoint, gaussians, *renderArgs)
                 image = torch.clamp(render_pkg["render"], 0.0, 1.0)
                 gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                if epoch % 100 == 0:                    
-                    if tb_writer and (idx < 5):
+                if epoch % opt.visualization_epoch_interval == 0:                    
+                    if tb_writer and (idx % int(len(config['cameras']) / opt.number_visualization) == 0):
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=epoch)
-                        if epoch == 100:
+                        if epoch == opt.visualization_epoch_interval:
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=epoch)
                 l1_test += l1_loss(image, gt_image).mean().double()
                 psnr_test += psnr(image, gt_image).mean().double()

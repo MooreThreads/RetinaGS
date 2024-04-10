@@ -260,8 +260,10 @@ class GaussianModel:
 
         self.active_sh_degree = self.max_sh_degree
 
-    def load_ply_own(self, path : str):
-            
+    def load_ply_own(self, path : str, spatial_lr_scale : float):
+        
+        self.spatial_lr_scale = spatial_lr_scale
+        
         plydata = PlyData.read(path)
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),

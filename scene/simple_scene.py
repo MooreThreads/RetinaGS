@@ -87,7 +87,8 @@ class SimpleScene:
             gaussians.load_ply_own(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
+                                                           "point_cloud.ply"),
+                                   self.cameras_extent)
         else:
             gaussians.create_from_pcd(self.scene_info.point_cloud, self.cameras_extent, self.scale_control_rate, self.opacity_init)
     
