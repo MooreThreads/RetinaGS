@@ -471,6 +471,20 @@ class GaussianModel:
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+    
+    def only_prune_via_screen_space(self, max_screen_size):
+        
+        big_points_vs = self.max_radii2D > max_screen_size # 每步渲染更新最大值
+        prune_mask = big_points_vs
+        
+        opacities_new = self.get_opacity
+        opacities_new[prune_mask] = inverse_sigmoid(torch.min(opacities_new[prune_mask], torch.ones_like(opacities_new[prune_mask])*0.01))
+        optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
+        self._opacity = optimizable_tensors["opacity"]
+        self.max_radii2D[prune_mask] = 0.0
+        
+        torch.cuda.empty_cache()
+        
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
