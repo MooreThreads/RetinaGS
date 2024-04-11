@@ -111,6 +111,7 @@ class OptimizationParams(ParamGroup):
         self.max_gaussians = 40_000_000
         self.scales_reg_enable = False
         self.scales_reg_lr = 0.01
+        self.lr_scales_schedule = False
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

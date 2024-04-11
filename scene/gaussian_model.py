@@ -169,6 +169,10 @@ class GaussianModel:
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
+        self.scaling_scheduler_args = get_expon_lr_func(lr_init=training_args.scaling_lr_init,
+                                                    lr_final=training_args.scaling_lr_final,
+                                                    lr_delay_mult=training_args.scaling_lr_delay_mult,
+                                                    max_steps=training_args.scaling_lr_max_steps)
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -176,6 +180,17 @@ class GaussianModel:
             if param_group["name"] == "xyz":
                 lr = self.xyz_scheduler_args(iteration)
                 param_group['lr'] = lr
+                return lr
+    
+    def update_learning_rate_scaling(self, iteration):
+        ''' Learning rate scheduling per step '''
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "scaling":
+                lr = self.scaling_scheduler_args(iteration)
+                param_group['lr'] = lr
+                
+                print('lr_scaling:', str(lr))
+                    
                 return lr
 
     def construct_list_of_attributes(self):

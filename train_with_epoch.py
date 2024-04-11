@@ -33,6 +33,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     scene.load2gaussians(gaussians)
     train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()    
     opt.position_lr_max_steps = opt.epochs * len(train_dataset) # Auto update max steps
+    opt.scaling_lr_max_steps = opt.position_lr_max_steps
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -47,15 +48,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.position_lr_max_steps), desc="Training progress")
     first_iter += 1 # origin code add 1 to avoid corner cases on iteration 0, we just follow it
-
     iteration = first_iter
+    
     epoch = 0  
     
     while epoch < int(opt.epochs): # for i_epoch in range(NUM_EPOCH):
         
         epoch += 1 
         train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene.get_batch)
-        gaussians.update_learning_rate(iteration) # update lr every epoch        
+        gaussians.update_learning_rate(iteration) # update lr every epoch    
+        if opt.lr_scales_schedule:
+            gaussians.update_learning_rate_scaling(iteration)     
 
         for data in train_loader:
             iter_start.record()
@@ -176,6 +179,7 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
         if config['cameras'] and len(config['cameras']) > 0:
             l1_test = 0.0
             psnr_test = 0.0
+            ssim_test = 0.0
             for idx, viewpoint in enumerate(config['cameras']):                
                 render_pkg = renderFunc(viewpoint, gaussians, *renderArgs)
                 image = torch.clamp(render_pkg["render"], 0.0, 1.0)
@@ -187,12 +191,20 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
                             tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=epoch)
                 l1_test += l1_loss(image, gt_image).mean().double()
                 psnr_test += psnr(image, gt_image).mean().double()
+                ssim_test += ssim(image, gt_image)
             psnr_test /= len(config['cameras'])
             l1_test /= len(config['cameras'])          
-            print("\n[EPOCH {}] Evaluating {}: L1 {} PSNR {}".format(epoch, config['name'], l1_test, psnr_test))
+            ssim_test /= len(config['cameras'])          
+            print("\n[EPOCH {}] Evaluating {}: L1 {} PSNR {} SSIM {}".format(epoch, config['name'], l1_test, psnr_test, ssim_test))
+            
+            
             if tb_writer:
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, epoch)
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, epoch)
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - SSIM', ssim_test, epoch) 
+                if opt.scales_reg_enable:
+                    scales_reg = render_pkg["scales"].prod(dim=1).mean()               
+                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg', scales_reg, epoch)
 
     torch.cuda.empty_cache()
         
