@@ -112,6 +112,10 @@ class OptimizationParams(ParamGroup):
         self.scales_reg_enable = False
         self.scales_reg_lr = 0.01
         self.lr_scales_schedule = False
+        self.perception_loss = False
+        self.perception_net_type = "vgg"
+        self.perception_net_version = "0.1"
+        self.lambda_perception = 0.1        
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

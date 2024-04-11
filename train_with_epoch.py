@@ -10,6 +10,7 @@ from gaussian_renderer.render_metric import render as render_metric
 import sys
 from scene import SimpleScene, GaussianModel
 from utils.general_utils import safe_state
+from lpipsPyTorch import LPIPS
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -35,6 +36,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     opt.position_lr_max_steps = opt.epochs * len(train_dataset) # Auto update max steps
     opt.scaling_lr_max_steps = opt.position_lr_max_steps
     gaussians.training_setup(opt)
+    if opt.perception_loss:
+        CNN_IMAGE = LPIPS(net_type=opt.perception_net_type, 
+                    version=opt.perception_net_version).to('cuda')
+        print('lpips:{}.{}'.format(opt.perception_net_type, opt.perception_net_version))
+    else:
+        CNN_IMAGE = None
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -87,6 +94,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if opt.scales_reg_enable:
                 scales_reg = scales.prod(dim=1).mean()
                 loss += opt.scales_reg_lr * scales_reg
+            
+            # Pending for aligning with conventional usage
+            if opt.perception_loss:
+                perception_loss_val = torch.sum(CNN_IMAGE(image, gt_image))
+                loss += opt.lambda_perception * perception_loss_val
                 
             loss.backward()
 
@@ -128,7 +140,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         with torch.no_grad():
             if epoch % opt.eval_epoch_interval == 0:            
-                training_report_epoch(tb_writer, opt, epoch, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
+                training_report_epoch(tb_writer, opt, epoch, Ll1, loss, l1_loss, CNN_IMAGE, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
                 
             if opt.save_epoch_interval == -1 :
                 if epoch == opt.epochs:                
@@ -169,7 +181,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
         if iteration % 100 == 0:
             tb_writer.add_scalar('total_points', gaussians.get_xyz.shape[0], iteration)
         
-def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
+def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_loss, CNN_IMAGE, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
     # Report test and 1/8 of training set
     torch.cuda.empty_cache()
     train_dataset = scene.getTrainCameras()
@@ -180,6 +192,7 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
             l1_test = 0.0
             psnr_test = 0.0
             ssim_test = 0.0
+            lpips_test = 0.0
             for idx, viewpoint in enumerate(config['cameras']):                
                 render_pkg = renderFunc(viewpoint, gaussians, *renderArgs)
                 image = torch.clamp(render_pkg["render"], 0.0, 1.0)
@@ -192,20 +205,25 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
                 l1_test += l1_loss(image, gt_image).mean().double()
                 psnr_test += psnr(image, gt_image).mean().double()
                 ssim_test += ssim(image, gt_image)
+                if opt.perception_loss:
+                    lpips_test += torch.sum(CNN_IMAGE(image, gt_image))
             psnr_test /= len(config['cameras'])
             l1_test /= len(config['cameras'])          
-            ssim_test /= len(config['cameras'])          
-            print("\n[EPOCH {}] Evaluating {}: L1 {} PSNR {} SSIM {}".format(epoch, config['name'], l1_test, psnr_test, ssim_test))
+            ssim_test /= len(config['cameras'])    
+            lpips_test /= len(config['cameras'])       
+            print("\n[EPOCH {}] Evaluating {}: L1 {} PSNR {} SSIM {} perception loss {}".format(epoch, config['name'], l1_test, psnr_test, ssim_test,lpips_test))
             
             
             if tb_writer:
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, epoch)
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, epoch)
-                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - SSIM', ssim_test, epoch) 
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - SSIM', ssim_test, epoch)
+                if opt.perception_loss:
+                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - perception_loss ' + opt.perception_net_type + '.' + opt.perception_net_version, lpips_test, epoch)                     
                 if opt.scales_reg_enable:
                     scales_reg = render_pkg["scales"].prod(dim=1).mean()               
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg', scales_reg, epoch)
-
+                    
     torch.cuda.empty_cache()
         
 if __name__ == "__main__":
