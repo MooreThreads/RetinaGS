@@ -21,6 +21,7 @@ from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
+from lpipsPyTorch import LPIPS
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 try:
@@ -41,6 +42,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     scene.load2gaussians(gaussians)
     gaussians.training_setup(opt)
     print('spatial_lr_scale is {}'.format(gaussians.spatial_lr_scale))
+    if opt.perception_loss:
+        CNN_IMAGE = LPIPS(net_type=opt.perception_net_type, 
+                          version=opt.perception_net_version).to('cuda')
+        print('lpips:{}.{}'.format(opt.perception_net_type, opt.perception_net_version))
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -87,7 +92,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Loss
             gt_image = viewpoint_cam.original_image.cuda()
             Ll1 = l1_loss(image, gt_image)
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            if not opt.perception_loss:
+                loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            else:
+                loss = (1.0 - opt.lambda_dssim) * Ll1 \
+                    + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) \
+                    + opt.lambda_perception * torch.sum(CNN_IMAGE(image, gt_image))
             loss.backward()
 
             iter_end.record()
@@ -163,7 +173,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
 
     # Report test and samples of training set
     if iteration in testing_iterations:
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         train_dataset = scene.getTrainCameras()        
         validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
                               {'name': 'train', 'cameras' : [train_dataset[idx] for idx in range(0, len(train_dataset), 8)]})       
@@ -190,7 +200,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
         if tb_writer:
             tb_writer.add_histogram("scene/opacity_histogram", gaussians.get_opacity, iteration)
             tb_writer.add_scalar('total_points', gaussians.get_xyz.shape[0], iteration)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     # Set up command line argument parser

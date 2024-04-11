@@ -52,7 +52,10 @@ SKIP_CLONE = False
 PERCEPTION_LOSS = False
 CNN_IMAGE = None
 
-def grid_setup(args, logger:logging.Logger):
+def grid_setup(train_args, logger:logging.Logger):
+    args = train_args[0]
+    opt = train_args[2]
+
     global ENABLE_REPARTITION; ENABLE_REPARTITION = args.ENABLE_REPARTITION
     global EVAL_PSNR_INTERVAL; EVAL_PSNR_INTERVAL = args.EVAL_PSNR_INTERVAL
     global Z_NEAR; Z_NEAR = args.Z_NEAR
@@ -63,11 +66,14 @@ def grid_setup(args, logger:logging.Logger):
     global SKIP_PRUNE_AFTER_RESET; SKIP_PRUNE_AFTER_RESET = args.SKIP_PRUNE_AFTER_RESET
     global SKIP_SPLIT; SKIP_SPLIT = args.SKIP_SPLIT
     global SKIP_CLONE; SKIP_CLONE = args.SKIP_CLONE
-    global PERCEPTION_LOSS; PERCEPTION_LOSS = args.PERCEPTION_LOSS
+    global PERCEPTION_LOSS; PERCEPTION_LOSS = opt.perception_loss
     global CNN_IMAGE
     if PERCEPTION_LOSS:
-        CNN_IMAGE = LPIPS(net_type = 'alex', version = '0.1').to('cuda')
-        logger.info("PERCEPTION_LOSS is ENABLED")
+        CNN_IMAGE = LPIPS(
+            net_type=opt.perception_net_type,
+            version=opt.perception_net_version
+            ).to('cuda')
+        logger.info("PERCEPTION_LOSS is {}.{}".format(opt.perception_net_type, opt.perception_net_version))
     logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE))    
 
 torch.multiprocessing.set_sharing_strategy('file_system')
@@ -306,7 +312,7 @@ def training_report(
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
         tb_writer.add_scalar('iter_time', elapsed, iteration)
         tb_writer.add_scalar('cnt/memory', torch.cuda.memory_allocated()/(1024**3), iteration)
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
 
 def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
     view_messages = [ViewMessage(e, id=int(_id)) for e, _id in zip(packages, cameraUid_taskId_mainRank[:,1])]  
@@ -344,7 +350,9 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
         if PERCEPTION_LOSS:
             assert CNN_IMAGE is not None
-            loss = (1-opt.lambda_perception)*loss + opt.lambda_perception * torch.sum(CNN_IMAGE(image, gt_image))
+            loss = (1.0 - opt.lambda_dssim) * Ll1 \
+                + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) \
+                + opt.lambda_perception * torch.sum(CNN_IMAGE(image, gt_image))
         loss_dict[k] = loss
                 
         loss_main_rank += loss
@@ -628,7 +636,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             iter_time = iter_start.elapsed_time(iter_end)
             
             with torch.no_grad():
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
                 # Progress bar
                 if dist.get_rank() == 0:
                     ema_loss_for_log = 0.4 * loss_main_rank.item() + 0.6 * ema_loss_for_log
@@ -682,7 +690,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             iteration += batch_size
             step += 1
             gaussians_group.clean_cached_features()
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             t_iter_end = time.time()
 
         # after traversing dataset
@@ -836,13 +844,12 @@ def eval(
             _gaussians = gaussians_group.all_gaussians[name]
             tb_writer.add_scalar('total_points_{}'.format(model_id), _gaussians.get_xyz.shape[0], iteration)
 
-    torch.cuda.empty_cache()
 
 def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, train_args):
     mp_setup(rank, world_size, LOCAL_RANK, MASTER_ADDR, MASTER_PORT)
     dataset_args = train_args[1]
     tb_writer, logger = prepare_output_and_logger(dataset_args, train_args)
-    grid_setup(train_args[0], logger)
+    grid_setup(train_args, logger)
     try:
         training(*train_args, (tb_writer, logger))
     except:

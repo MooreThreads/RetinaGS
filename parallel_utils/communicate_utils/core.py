@@ -4,6 +4,8 @@ import torch.distributed
 from typing import NamedTuple
 import numpy as np
 import logging
+from torch.profiler import record_function
+
 
 # assume all shape is of size 3
 def _send_shape(tensor_send: torch.Tensor, dst: int, group: torch.distributed.ProcessGroup):
@@ -59,6 +61,37 @@ def batched_send_recv_v0(send_tasks, recv_tasks, logger:logging.Logger):
     # To protect against race condition when using batch_isend_irecv().
     # User should assert that we have a modern enough PyTorch to not need this
     torch.cuda.synchronize()
+    logger.debug('batched_send_recv v0')
+
+def batched_send_recv_v0_profiling(send_tasks, recv_tasks, logger:logging.Logger):
+    '''
+    assumption: user has arranged the order of tasks 
+    '''
+    for op in send_tasks:
+        logger.debug('send {} to {}'.format(op[0].shape, op[1]))
+    for op in recv_tasks:
+        logger.debug('recv {} from {}'.format(op[0].shape, op[1]))
+
+    with record_function("batched_send_recv_v0"):
+        ops = []
+        for send_task in send_tasks:
+            tensor, dst_peer, group = send_task
+            ops.append(torch.distributed.P2POp(torch.distributed.isend, tensor, dst_peer, group))
+
+        for recv_task in recv_tasks:
+            tensor, src_peer, group = recv_task
+            ops.append(torch.distributed.P2POp(torch.distributed.irecv, tensor, src_peer, group))
+
+        if len(ops) > 0:
+            reqs = torch.distributed.batch_isend_irecv(ops)
+            for req in reqs:
+                req.wait()
+        else:
+            # "empty operation list can cause error"
+            pass 
+        # To protect against race condition when using batch_isend_irecv().
+        # User should assert that we have a modern enough PyTorch to not need this
+        torch.cuda.synchronize()
     logger.debug('batched_send_recv v0')
 
 # use synchronous function to send/recv batch of tensors

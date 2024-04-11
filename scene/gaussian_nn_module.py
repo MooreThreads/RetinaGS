@@ -258,8 +258,11 @@ class GaussianModel2(nn.Module):
         self._opacity = optimizable_tensors["opacity"]
         # self._means2D_meta *= 0
 
-    def load_ply(self, path):
-        plydata = PlyData.read(path)
+    def load_ply(self, path, ply_data_in_memory:PlyData=None):
+        if ply_data_in_memory is None:
+            plydata = PlyData.read(path)
+        else:
+            plydata = ply_data_in_memory
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                         np.asarray(plydata.elements[0]["y"]),
@@ -538,7 +541,7 @@ class BoundedGaussianModel(GaussianModel2):
         self.xyz_gradient_accum[update_filter] += torch.abs(self._means2D_meta.grad[update_filter])
         self.denom[update_filter] += 1
 
-    def pack_up(self):
+    def pack_up(self, scale_factor=1):
         with torch.no_grad():
             P = self._xyz.shape[0]
             name2torchPara = {}
@@ -578,7 +581,7 @@ class BoundedGaussianModel(GaussianModel2):
 
             ret = torch.cat([para, exp_avg, exp_avg_sq], dim=-1)
 
-        return ret.to(torch.float).contiguous(), self.get_scaling
+        return ret.to(torch.float).contiguous(), scale_factor*self.get_scaling
     
     def simple_pack_up(self):
         with torch.no_grad():
@@ -733,6 +736,16 @@ class BoundedGaussianModel(GaussianModel2):
             self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+
+    def discard_gs_out_range(self, scale_factor=1):
+        scale = scale_factor*self.get_scaling
+        max_radii, _idx = torch.max(scale, dim=-1, keepdim=True)
+        max_radii = (max_radii*3).clamp(min=0)
+        flag1 = (self.get_xyz + max_radii) >= self.range_low
+        flag2 = (self.get_xyz - max_radii) <= self.range_up
+        _flag = torch.logical_and(flag1, flag2)
+        flag = torch.all(_flag, dim=-1, keepdim=False)
+        self.prune_points(mask=~flag)
 
 
 class BoundedGaussianModelGroup(nn.Module):

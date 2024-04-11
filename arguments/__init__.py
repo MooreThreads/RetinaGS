@@ -88,7 +88,10 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        self.lambda_perception = 0.15
+        self.perception_loss= False
+        self.perception_net_type = "vgg"
+        self.perception_net_version = "0.1"
+        self.lambda_perception = 0.1
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500

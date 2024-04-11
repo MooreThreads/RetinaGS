@@ -3,7 +3,7 @@ import torch
 import torch.distributed as dist
 import numpy as np
 
-from parallel_utils.communicate_utils.core import send_tensor, recv_tensor, batched_send_recv_v0, batched_send_recv_v1, batched_send_recv_v2 
+from parallel_utils.communicate_utils.core import send_tensor, recv_tensor, batched_send_recv_v0, batched_send_recv_v1, batched_send_recv_v2, batched_send_recv_v0_profiling 
 from parallel_utils.grid_utils.utils import BoxinGrid3D, overlap_BoxinGrid3D
 from parallel_utils.schedulers.core import SendTask, RecvTask, RenderTask, MainRankTask
 
@@ -41,6 +41,7 @@ BATCHED_SEND_RECV_DICT = {
     '0': batched_send_recv_v0,
     '1': batched_send_recv_v1,
     '2': batched_send_recv_v2,
+    '0+profiling': batched_send_recv_v0_profiling,
 }
 
 

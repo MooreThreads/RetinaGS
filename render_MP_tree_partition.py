@@ -331,8 +331,8 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     # partOftrain = PartOfDataset(train_dataset, empty=False, start=0, end=None)
     partOftrain = DatasetRepeater(
         train_dataset, 
-        repeat_utill=len(train_dataset)//10, 
-        empty=False, step=10)
+        repeat_utill=len(train_dataset)//1, 
+        empty=False, step=1)
     train_loader = DataLoader(partOftrain, 
                                 batch_size=1, num_workers=2, prefetch_factor=2, drop_last=False,
                                 shuffle=False, collate_fn=SceneV3.get_batch)
