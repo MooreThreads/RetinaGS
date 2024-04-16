@@ -493,7 +493,7 @@ def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    ply_path = os.path.join(path, "{}.ply".format(points3D))
     if not os.path.exists(ply_path):
         # Since this data set has no colmap data, we start with random points
         num_pts = 100_000

@@ -189,7 +189,7 @@ class GaussianModel:
                 lr = self.scaling_scheduler_args(iteration)
                 param_group['lr'] = lr
                 
-                print('lr_scaling:', str(lr))
+                # print('lr_scaling:', str(lr))
                     
                 return lr
 
@@ -476,6 +476,8 @@ class GaussianModel:
         
         big_points_vs = self.max_radii2D > max_screen_size # 每步渲染更新最大值
         prune_mask = big_points_vs
+        
+        print("reset opacity of " + str(torch.sum(prune_mask).item()))
         
         opacities_new = self.get_opacity
         opacities_new[prune_mask] = inverse_sigmoid(torch.min(opacities_new[prune_mask], torch.ones_like(opacities_new[prune_mask])*0.01))

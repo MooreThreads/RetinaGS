@@ -111,6 +111,8 @@ class OptimizationParams(ParamGroup):
         self.max_gaussians = 40_000_000
         self.scales_reg_enable = False
         self.scales_reg_lr = 0.01
+        self.scales_reg_sum_enable = False
+        self.scales_reg_sum_lr = 0.01
         self.lr_scales_schedule = False
         self.perception_loss = False
         self.perception_net_type = "vgg"

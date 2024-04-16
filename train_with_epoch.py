@@ -94,6 +94,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if opt.scales_reg_enable:
                 scales_reg = scales.prod(dim=1).mean()
                 loss += opt.scales_reg_lr * scales_reg
+                
+            if opt.scales_reg_sum_enable:
+                scales_reg = scales.sum(dim=1).mean()
+                loss += opt.scales_reg_sum_lr * scales_reg
             
             # Pending for aligning with conventional usage
             if opt.perception_loss:
@@ -131,7 +135,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 # Only purning
                 if opt.only_prune_via_screen_space_enable:
                     gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                    if iteration % 1000 == 0:
+                    if iteration % 200 == 0:
                         size_threshold = opt.screen_size_threshold 
                         gaussians.only_prune_via_screen_space(size_threshold)
                     
@@ -228,9 +232,10 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - SSIM', ssim_test, epoch)
                 if opt.perception_loss:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - perception_loss ' + opt.perception_net_type + '.' + opt.perception_net_version, lpips_test, epoch)                     
-                if opt.scales_reg_enable:
-                    scales_reg = render_pkg["scales"].prod(dim=1).mean()               
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg', scales_reg, epoch)
+                scales_reg = render_pkg["scales"].prod(dim=1).mean()               
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg', scales_reg, epoch)
+                scales_reg = render_pkg["scales"].sum(dim=1).mean()               
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg_sum', scales_reg, epoch)
                     
     torch.cuda.empty_cache()
         
