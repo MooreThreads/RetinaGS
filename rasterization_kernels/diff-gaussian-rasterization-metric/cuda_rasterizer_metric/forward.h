@@ -39,6 +39,7 @@ namespace FORWARD
 		const float tan_fovx, float tan_fovy,
 		int* radii,
 		double* area_2d,
+		double* area_2d_2,
 		float2* points_xy_image,
 		float* depths,
 		float* cov3Ds,
@@ -56,6 +57,7 @@ namespace FORWARD
 		int W, int H,
 		const float2* points_xy_image,
 		const double* area_2d,
+		const double* area_2d_2,
 		const float* features,
 		const float* depths,
 		const float4* conic_opacity,
@@ -65,7 +67,8 @@ namespace FORWARD
 		float* out_color,
 		float* out_depth,
 		float* out_cnt,
-		double* out_cnt2);
+		double* out_cnt2,
+		double* out_cnt3);
 }
 
 

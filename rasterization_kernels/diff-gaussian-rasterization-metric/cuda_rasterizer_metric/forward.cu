@@ -171,6 +171,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float focal_x, float focal_y,
 	int* radii,
 	double* area_2d,
+	double* area_2d_2,
 	float2* points_xy_image,
 	float* depths,
 	float* cov3Ds,
@@ -188,6 +189,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// this Gaussian will not be processed further.
 	radii[idx] = 0;
 	area_2d[idx] = 0.0;
+	area_2d_2[idx] = 0.0;
 	tiles_touched[idx] = 0;
 
 	// Perform near culling, quit if outside.
@@ -232,10 +234,14 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
 	float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
 	float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
-	double my_area = double(sqrt(lambda1)) * double(sqrt(lambda2));
+	float my_radius_2 = ceil(3.f * sqrt(min(lambda1, lambda2)));
+	// double my_area = double(sqrt(lambda1)) * double(sqrt(lambda2)); // nan
+	// double my_area = double(sqrt(ndc2Pix(lambda1, W))) * double(sqrt(ndc2Pix(lambda2, W)));
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	uint2 rect_min, rect_max;
+	uint2 rect_min_2, rect_max_2;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
+	getRect(point_image, my_radius_2, rect_min_2, rect_max_2, grid);
 	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
 		return;
 
@@ -256,7 +262,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
+	uint32_t tiles_touched_2;
+	tiles_touched_2 = (rect_max_2.y - rect_min_2.y) * (rect_max_2.x - rect_min_2.x);
 	area_2d[idx] = double(tiles_touched[idx]);
+	area_2d_2[idx] = sqrt(double(tiles_touched_2))*sqrt(double(tiles_touched[idx]));
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -270,6 +279,7 @@ renderCUDA(
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
 	const double* __restrict__ area_2d,
+	const double* __restrict__ area_2d_2,
 	const float* __restrict__ features,
 	const float* __restrict__ depths,
 	const float4* __restrict__ conic_opacity,
@@ -279,7 +289,8 @@ renderCUDA(
 	float* __restrict__ out_color,
 	float* __restrict__ out_depth,
 	float* __restrict__ out_cnt,
-	double* __restrict__ out_cnt2)
+	double* __restrict__ out_cnt2,
+	double* __restrict__ out_cnt3)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -305,6 +316,7 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ double collected_area_2d[BLOCK_SIZE];
+	__shared__ double collected_area_2d_2[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -315,6 +327,7 @@ renderCUDA(
 	float D = 0;
 	float _cnt = 0; 
 	double _cnt2 = 0;
+	double _cnt3 = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -333,6 +346,7 @@ renderCUDA(
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			collected_area_2d[block.thread_rank()] = area_2d[coll_id];
+			collected_area_2d_2[block.thread_rank()] = area_2d_2[coll_id];
 		}
 		block.sync();
 
@@ -372,6 +386,7 @@ renderCUDA(
 			D += depths[collected_id[j]] * alpha * T;
 			_cnt += 1.0f;
 			_cnt2 += collected_area_2d[j] * double(alpha * T);
+			_cnt3 += collected_area_2d_2[j] * double(alpha * T);
 
 			T = test_T;
 
@@ -392,6 +407,7 @@ renderCUDA(
 		out_depth[pix_id] = D;
 		out_cnt[pix_id] = _cnt;
 		out_cnt2[pix_id] = _cnt2;
+		out_cnt3[pix_id] = _cnt3;
 	}
 }
 
@@ -402,6 +418,7 @@ void FORWARD::render(
 	int W, int H,
 	const float2* means2D,
 	const double* area_2d,
+	const double* area_2d_2,
 	const float* colors,
 	const float* depths,
 	const float4* conic_opacity,
@@ -411,7 +428,8 @@ void FORWARD::render(
 	float* out_color,
 	float* out_depth,
 	float* out_cnt,
-	double* out_cnt2)
+	double* out_cnt2,
+	double* out_cnt3)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -419,6 +437,7 @@ void FORWARD::render(
 		W, H,
 		means2D,
 		area_2d,
+		area_2d_2,
 		colors,
 		depths,
 		conic_opacity,
@@ -428,7 +447,8 @@ void FORWARD::render(
 		out_color,
 		out_depth,
 		out_cnt,
-		out_cnt2);
+		out_cnt2,
+		out_cnt3);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -449,6 +469,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float tan_fovx, float tan_fovy,
 	int* radii,
 	double* area_2d,
+	double* area_2d_2,
 	float2* means2D,
 	float* depths,
 	float* cov3Ds,
@@ -477,6 +498,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		focal_x, focal_y,
 		radii,
 		area_2d,
+		area_2d_2,
 		means2D,
 		depths,
 		cov3Ds,

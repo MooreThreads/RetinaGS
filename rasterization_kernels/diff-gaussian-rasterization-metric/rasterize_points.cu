@@ -32,7 +32,7 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     return lambda;
 }
 
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA_metric(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -70,9 +70,11 @@ RasterizeGaussiansCUDA_metric(
   torch::Tensor out_depth = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor out_cnt = torch::full({1, H, W}, 0.0, float_opts);  
   torch::Tensor out_cnt2 = torch::full({1, H, W}, 0.0, double_opts); 
+  torch::Tensor out_cnt3 = torch::full({1, H, W}, 0.0, double_opts);
   torch::Tensor out_alpha = torch::full({1, H, W}, 0.0, float_opts);
   torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
   torch::Tensor area_2d = torch::full({P}, 0.0, double_opts);
+  torch::Tensor area_2d_2 = torch::full({P}, 0.0, double_opts);
   
   torch::Device device(torch::kCUDA);
   torch::TensorOptions options(torch::kByte);
@@ -117,12 +119,14 @@ RasterizeGaussiansCUDA_metric(
 		out_depth.contiguous().data<float>(),
 		out_cnt.contiguous().data<float>(),
 		out_cnt2.contiguous().data<double>(),
+		out_cnt3.contiguous().data<double>(),
 		out_alpha.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
 		area_2d.contiguous().data<double>(),
+		area_2d_2.contiguous().data<double>(),
 		debug);
   }
-  return std::make_tuple(rendered, out_color, out_depth, out_cnt, out_cnt2, out_alpha, radii, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, out_depth, out_cnt, out_cnt2, out_cnt3, out_alpha, radii, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

@@ -47,7 +47,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     num_image = len(views)    
     num_pixel = 0
     num_GS = gaussians._xyz.shape[0]
-    cnt_ssim, cnt_psnr, cnt_lpips, cnt_GSPI, cnt_GSPP, cnt_MAPP, cnt_AT = 0, 0, 0, 0, 0, 0, 0    # Gaussian per Pixel, Mean Area per Pixel, Activated Times
+    cnt_ssim, cnt_psnr, cnt_lpips, cnt_GSPI, cnt_GSPP, cnt_MAPP, cnt_MAPP_2, cnt_AT = 0, 0, 0, 0, 0, 0, 0, 0   # Gaussian per Pixel, Mean Area per Pixel, Activated Times
     
     AGS_mask = torch.zeros((num_GS,1), dtype=torch.bool, device='cuda') # Activated Mask of Gaussian
     
@@ -62,7 +62,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
         # compute metric        
         gt:torch.Tensor = view.original_image[0:3, :, :].cuda()        
-        cnt_GS, cnt_MA = render_pkg["cnt1"], render_pkg["cnt2"]
+        cnt_GS, cnt_MA, cnt_MA_2 = render_pkg["cnt1"], render_pkg["cnt2"], render_pkg["cnt3"]
         psnr_image = psnr(rendering, gt).mean()
         ssim_image = ssim(rendering, gt)
         lpips_image = lpips(rendering, gt)
@@ -83,6 +83,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         num_pixel += (rendering.numel()/3)
         cnt_GSPP += cnt_GS.sum().item()
         cnt_MAPP += cnt_MA.sum().item()
+        cnt_MAPP_2 += cnt_MA_2.sum().item()
         cnt_AT += cnt_GS.sum().item()
         cnt_GSPI += GSPI_image
         cnt_ssim += ssim_image.item()
@@ -103,7 +104,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                                                 "PSNR": psnr_image.item(),
                                                 "GSPI": GSPI_image,
                                                 "GSPP": cnt_GS.sum().item()/(rendering.numel()/3),
-                                                "MAPP": cnt_MA.sum().item()                                              
+                                                "MAPP": cnt_MA.sum().item()/(rendering.numel()/3),
+                                                "MAPP_2": cnt_MA.sum().item()/(rendering.numel()/3)                                               
                                                 }
         
     full_dict[name].update({"Mean of SSIM": cnt_ssim/num_image,
@@ -113,13 +115,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                             "Mean of GSPI": cnt_GSPI/num_image,
                             "Mean of GSPP": cnt_GSPP/num_pixel,
                             "Mean of MAPP": cnt_MAPP/num_pixel,
+                            "Mean of MAPP_2": cnt_MAPP_2/num_pixel,
                             "GS": num_GS,
                             "AGSR": AGS_mask.sum().item()/num_GS,
                             "AT": cnt_GSPP/num_GS})
 
     if num_pixel > 0:
-       print(name + ": Mean of SSIM {}, Mean of PSNR {}, Mean of LPIPS {}, Mean of GSPI {}, Mean of GSPP {}, Mean of MAPP {}, AGSR {}, AT {}".format(
-             cnt_ssim/num_image, cnt_psnr/num_image, cnt_lpips/num_image, cnt_GSPI/num_image, cnt_GSPP/num_pixel, cnt_MAPP/num_pixel, AGS_mask.sum().item()/num_GS, cnt_GSPP/num_GS
+       print(name + ": Mean of SSIM {}, Mean of PSNR {}, Mean of LPIPS {}, Mean of GSPI {}, Mean of GSPP {}, Mean of MAPP {}, Mean of MAPP_2 {}, AGSR {}, AT {}".format(
+             cnt_ssim/num_image, cnt_psnr/num_image, cnt_lpips/num_image, cnt_GSPI/num_image, cnt_GSPP/num_pixel, cnt_MAPP/num_pixel, cnt_MAPP_2/num_pixel, AGS_mask.sum().item()/num_GS, cnt_GSPP/num_GS
              ))
     else:
         print('empty!')    
