@@ -99,6 +99,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 scales_reg = scales.sum(dim=1).mean()
                 loss += opt.scales_reg_sum_lr * scales_reg
             
+            if opt.scales_reg_square_sum_enable:
+                scales_reg = scales.pow(2).sum(dim=1).mean()
+                loss += opt.scales_reg_square_sum_lr * scales_reg
+            
             # Pending for aligning with conventional usage
             if opt.perception_loss:
                 perception_loss_val = torch.sum(CNN_IMAGE(image, gt_image))
@@ -234,8 +238,10 @@ def training_report_epoch(tb_writer, opt : PipelineParams, epoch, Ll1, loss, l1_
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - perception_loss ' + opt.perception_net_type + '.' + opt.perception_net_version, lpips_test, epoch)                     
                 scales_reg = render_pkg["scales"].prod(dim=1).mean()               
                 tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg', scales_reg, epoch)
-                scales_reg = render_pkg["scales"].sum(dim=1).mean()               
-                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg_sum', scales_reg, epoch)
+                scales_reg_sum = render_pkg["scales"].sum(dim=1).mean()               
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg_sum', scales_reg_sum, epoch)
+                scales_reg_square_sum = render_pkg["scales"].pow(2).sum(dim=1).mean()
+                tb_writer.add_scalar(config['name'] + '/loss_viewpoint - scales_reg_square_sum', scales_reg_square_sum, epoch)
                     
     torch.cuda.empty_cache()
         
