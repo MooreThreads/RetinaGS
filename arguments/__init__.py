@@ -120,6 +120,7 @@ class OptimizationParams(ParamGroup):
         self.perception_net_type = "vgg"
         self.perception_net_version = "0.1"
         self.lambda_perception = 0.1
+        self.huber_loss_replacement_enable = False
         self.only_prune_via_screen_space_enable = False     
         self.screen_size_threshold   = 20
         super().__init__(parser, "Optimization Parameters")
