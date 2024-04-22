@@ -32,7 +32,10 @@ def render_wrapper(viewpoint_cam, gaussians, pipe, background):
     viewpoint_cam.to_device('cuda')
     return render(viewpoint_cam, gaussians, pipe, background) 
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_step, full_dict, per_view_dict):
+def gain_activated_gs(gaussians, activated_mask):
+    gaussians.prune_points(~activated_mask)
+
+def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     residual_path = os.path.join(model_path, name, "ours_{}".format(iteration), "residual")
@@ -120,6 +123,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                             "AGSR": AGS_mask.sum().item()/num_GS,
                             "AT": cnt_GSPP/num_GS})
 
+    if save_activated_ply and name == "train":
+        with torch.no_grad():
+            gain_activated_gs(gaussians, AGS_mask.squeeze())
+            print("activate gs: {}".format(AGS_mask.sum().item()))
+    
     if num_pixel > 0:
        print(name + ": Mean of SSIM {}, Mean of PSNR {}, Mean of LPIPS {}, Mean of GSPI {}, Mean of GSPP {}, Mean of MAPP {}, Mean of MAPP_2 {}, AGSR {}, AT {}".format(
              cnt_ssim/num_image, cnt_psnr/num_image, cnt_lpips/num_image, cnt_GSPI/num_image, cnt_GSPP/num_pixel, cnt_MAPP/num_pixel, cnt_MAPP_2/num_pixel, AGS_mask.sum().item()/num_GS, cnt_GSPP/num_GS
@@ -128,7 +136,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('empty!')    
 
 
-def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, save_step : int):
+def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, save_step : int, save_activated_ply: bool):
     gaussians = GaussianModel(dataset.sh_degree)
     scene = SimpleScene(dataset, load_iteration=iteration) # scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
     scene.load2gaussians(gaussians)
@@ -140,13 +148,18 @@ def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : Pipeline
     print('enable auto_grad to count the activated times of Gaussians')
     full_dict =  {}
     per_view_dict = {}
-    if not skip_train:
-        print("train")
-        render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, save_step, full_dict, per_view_dict)
 
     if not skip_test:
         print('test')
-        render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, save_step, full_dict, per_view_dict)
+        render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict)
+    
+    if not skip_train:
+        print("train")
+        render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict)
+        
+    if save_activated_ply:
+        print("\n[ITER {}] Saving Activated Gaussians".format(scene.loaded_iter))
+        gaussians.save_ply(os.path.join(dataset.model_path, "point_cloud/iteration_{}".format(scene.loaded_iter), "point_cloud_only_activated.ply"))
     
     with open(dataset.model_path + "/per_view.json", 'w') as fp:
         json.dump(per_view_dict, fp, indent=True)
@@ -165,10 +178,11 @@ if __name__ == "__main__":
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--save_step", default=-1, type=int)
+    parser.add_argument("--save_activated_ply", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), op.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.save_step)
+    render_sets(model.extract(args), op.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.save_step, args.save_activated_ply)
