@@ -35,7 +35,7 @@ def render_wrapper(viewpoint_cam, gaussians, pipe, background):
 def gain_activated_gs(gaussians, activated_mask):
     gaussians.prune_points(~activated_mask)
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict):
+def render_set(model_path, name, iteration, views, gaussians, pipeline, background, skip_lpips, save_step, save_activated_ply, full_dict, per_view_dict):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     residual_path = os.path.join(model_path, name, "ours_{}".format(iteration), "residual")
@@ -66,9 +66,12 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         # compute metric        
         gt:torch.Tensor = view.original_image[0:3, :, :].cuda()        
         cnt_GS, cnt_MA, cnt_MA_2 = render_pkg["cnt1"], render_pkg["cnt2"], render_pkg["cnt3"]
-        psnr_image = psnr(rendering, gt).mean()
-        ssim_image = ssim(rendering, gt)
-        lpips_image = lpips(rendering, gt)
+        psnr_image = psnr(rendering, gt).mean().item()
+        ssim_image = ssim(rendering, gt).item()
+        if skip_lpips:
+            lpips_image = 0.0
+        else:    
+            lpips_image = lpips(rendering, gt).item()
         
         # find activated gs by check grad
         loss = torch.abs(gt - rendering).sum()
@@ -89,9 +92,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         cnt_MAPP_2 += cnt_MA_2.sum().item()
         cnt_AT += cnt_GS.sum().item()
         cnt_GSPI += GSPI_image
-        cnt_ssim += ssim_image.item()
-        cnt_psnr += psnr_image.item()
-        cnt_lpips += lpips_image.item()
+        cnt_ssim += ssim_image
+        cnt_psnr += psnr_image
+        cnt_lpips += lpips_image
        
         
         # save and log
@@ -102,9 +105,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             torchvision.utils.save_image(residual, os.path.join(residual_path, view.image_name + ".png"))            
         
         per_view_dict[name][view.image_name] = {
-                                                "LPIPS": lpips_image.item(),                                                                        
-                                                "SSIM": ssim_image.item(),
-                                                "PSNR": psnr_image.item(),
+                                                "LPIPS": lpips_image,                                                                        
+                                                "SSIM": ssim_image,
+                                                "PSNR": psnr_image,
                                                 "GSPI": GSPI_image,
                                                 "GSPP": cnt_GS.sum().item()/(rendering.numel()/3),
                                                 "MAPP": cnt_MA.sum().item()/(rendering.numel()/3),
@@ -136,7 +139,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('empty!')    
 
 
-def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, save_step : int, save_activated_ply: bool):
+def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_lpips : bool, save_step : int, save_activated_ply: bool):
     gaussians = GaussianModel(dataset.sh_degree)
     scene = SimpleScene(dataset, load_iteration=iteration) # scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
     scene.load2gaussians(gaussians)
@@ -151,11 +154,11 @@ def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : Pipeline
 
     if not skip_test:
         print('test')
-        render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict)
+        render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, skip_lpips, save_step, save_activated_ply, full_dict, per_view_dict)
     
     if not skip_train:
         print("train")
-        render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, save_step, save_activated_ply, full_dict, per_view_dict)
+        render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, skip_lpips, save_step, save_activated_ply, full_dict, per_view_dict)
         
     if save_activated_ply:
         print("\n[ITER {}] Saving Activated Gaussians".format(scene.loaded_iter))
@@ -176,6 +179,7 @@ if __name__ == "__main__":
     parser.add_argument("--iteration", default=-1, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
+    parser.add_argument("--skip_lpips", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--save_step", default=-1, type=int)
     parser.add_argument("--save_activated_ply", action="store_true")
@@ -185,4 +189,4 @@ if __name__ == "__main__":
     # Initialize system state (RNG)
     safe_state(args.quiet)
 
-    render_sets(model.extract(args), op.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.save_step, args.save_activated_ply)
+    render_sets(model.extract(args), op.extract(args), args.iteration, pipeline.extract(args), args.skip_train, args.skip_test, args.skip_lpips, args.save_step, args.save_activated_ply)
