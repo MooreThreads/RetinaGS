@@ -19,8 +19,6 @@ from lpipsPyTorch import lpips
 from utils.image_utils import psnr
 from os import makedirs
 from gaussian_renderer.render_metric import render
-from gaussian_renderer.render import render as render_2
-from gaussian_renderer.render_half_gs import render4BoundedGaussianModel as render_3
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
