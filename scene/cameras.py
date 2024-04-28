@@ -12,6 +12,7 @@
 import torch
 from torch import nn
 import numpy as np
+import math
 from utils.graphics_utils import getView2World, getWorld2View2, getProjectionMatrix
 
 
@@ -23,6 +24,7 @@ class Camera(nn.Module):
         super(Camera, self).__init__()
 
         self.uid = uid
+        self.id = uid
         self.colmap_id = colmap_id
         self.R = R
         self.T = T
@@ -95,6 +97,136 @@ class Camera(nn.Module):
         return float(point3d_view[0, 2])
 
 
+class Patch(nn.Module):
+    """
+    -----------> u-axis
+    | image|
+    |------|
+    |
+    v v-axis
+    
+    """
+    def __init__(self, camera:Camera, uid, v_start:int, v_end:int, u_start:int, u_end:int):
+        super(Patch, self).__init__()
+
+        self.uid = uid
+        self.id = uid
+        self.parent_uid = camera.uid
+        self.v_start = v_start
+        self.v_end = v_end
+        self.u_start = u_start
+        self.u_end = u_end
+        # copy from parent
+        self.colmap_id = camera.colmap_id
+        self.R = camera.R
+        self.T = camera.T
+        self.FoVx = camera.FoVx
+        self.FoVy = camera.FoVy
+        self.image_name = camera.image_name
+        self.data_device = camera.data_device
+    
+        assert 0 <= v_start < v_end <= camera.image_height
+        assert 0 <= u_start < u_end <= camera.image_width
+
+        self.original_image = camera.original_image[:, v_start:v_end, u_start:u_end]   # (3, H, W)
+
+        self.image_width = self.original_image.shape[2]
+        self.image_height = self.original_image.shape[1]
+        self.complete_width = camera.image_width
+        self.complete_height = camera.image_height
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        self.trans = camera.trans
+        self.scale = camera.scale
+
+        self.world_view_transform = camera.world_view_transform
+        self.projection_matrix = camera.projection_matrix
+        self.full_proj_transform = camera.full_proj_transform
+        self.camera_center = camera.camera_center
+        self.projection_matrix_inv = camera.projection_matrix_inv
+
+        self.all_tiles = self.get_tile_map(tile_size=16)
+
+    def to_device(self, device):
+        self.data_device = device
+        self.original_image = self.original_image.to(device)
+        self.world_view_transform = self.world_view_transform.to(device)
+        self.projection_matrix = self.projection_matrix.to(device)
+        self.projection_matrix_inv = self.projection_matrix_inv.to(device)
+        self.full_proj_transform = self.full_proj_transform.to(device)
+        self.camera_center = self.camera_center.to(device)
+
+        self.all_tiles = self.all_tiles.to(device)
+        return self
+
+    @staticmethod
+    def package_shape():
+        return (16, 4)
+    
+    def pack_up(self, device=None):
+        if device is None:
+            device = self.data_device
+        ret = torch.zeros((16, 4), dtype=torch.float32, device=self.data_device, requires_grad=False)
+        ret[0:4, :] = self.world_view_transform
+        ret[4:8, :] = self.full_proj_transform
+        ret[8:12,:] = self.projection_matrix_inv
+        ret[12, 0] = self.image_width
+        ret[12, 1] = self.image_height
+        ret[12, 2] = self.FoVx
+        ret[12, 3] = self.FoVy
+        ret[13, 0:3] = self.camera_center
+        ret[14, 0] = self.v_start
+        ret[14, 1] = self.v_end
+        ret[14, 2] = self.u_start
+        ret[14, 3] = self.u_end
+        
+        return ret.to(device)
+    
+    def get_depth(self, point3d:list) -> float:
+        point3d_homo = torch.ones((1,4), dtype=torch.float32, device=self.data_device)
+        point3d_homo[0, :3] = torch.tensor(point3d, dtype=torch.float32, device=self.data_device)
+        point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
+        return float(point3d_view[0, 2])
+    
+    def get_padding_range(self, tile_size=16):
+        # [tile_start, tile_end]
+        v_tile_start = self.v_start // tile_size
+        v_tile_end = (self.v_end - 1) // tile_size
+        u_tile_start = self.u_start // tile_size
+        u_tile_end = (self.u_end - 1) // tile_size
+        return v_tile_start*tile_size, (v_tile_end+1)*tile_size, u_tile_start*tile_size, (u_tile_end+1)*tile_size
+
+    def get_tile_map(self, tile_size=16):
+        v_tile_start = self.v_start // tile_size
+        v_tile_end = (self.v_end - 1) // tile_size
+        u_tile_start = self.u_start // tile_size
+        u_tile_end = (self.u_end - 1) // tile_size
+
+        v_range, u_range = math.ceil(self.complete_height / tile_size), math.ceil(self.complete_width / tile_size)  
+        complete_map = 1 + torch.arange(0, v_range * u_range, requires_grad=False).int().reshape(v_range, u_range)
+        tile_map = complete_map[v_tile_start:(v_tile_end + 1), u_tile_start:(u_tile_end + 1)]
+        return tile_map.reshape(-1).to(self.data_device)
+
+    def tiles2patch(self, tiles:torch.Tensor):
+        # tiles shall be shape of (num_tile, channel, h_tile, w_tile)
+        num_tile, channel, h_tile, w_tile = tiles.shape
+        v_tile_start = self.v_start // h_tile
+        v_tile_end = (self.v_end - 1) // h_tile
+        u_tile_start = self.u_start // w_tile
+        u_tile_end = (self.u_end - 1) // w_tile
+
+        tilesNumY = v_tile_end - v_tile_start + 1
+        tilesNumX = u_tile_end - u_tile_start + 1
+        tile_grid = tiles.transpose(0,1).reshape(channel, tilesNumY, tilesNumX, h_tile, w_tile).transpose(-2,-3)
+        patch_padding = tile_grid.reshape(channel, tilesNumY*h_tile,tilesNumX*w_tile)
+        
+        v_start_in_tile, u_start_in_tile = self.v_start % h_tile, self.u_start % w_tile
+        patch = patch_padding[:, v_start_in_tile:(v_start_in_tile + self.image_height) , u_start_in_tile:(u_start_in_tile + self.image_width)]
+        return patch
+    
+
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
         self.image_width = width
@@ -112,7 +244,8 @@ class MiniCam:
 class ViewMessage(nn.Module):
     def __init__(self, package: torch.Tensor, id: int) -> None:
         """
-        this class is built for the transport of Camera among GPUs
+        1. this class is built for the transport of Camera among GPUs, as some GPUs may not load dataset from hard disk
+        2. make sure that a Camera instance can always work as an alternate ViewMessage 
         package: package of Camera
         id: uuid
         """

@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import collections
+import time
 
 class NaiveWorkloadBalancer():
     def __init__(self, num_rank:int, model2rank:dict) -> None:
@@ -57,3 +58,25 @@ class NaiveWorkloadBalancer():
 
         return tuple(groups)
         
+class NaiveTimer():
+    def __init__(self, cuda_sync:bool=True) -> None:
+        self.tick_time = {}
+        self.cnt_time = {}
+        self.total_time = {}
+        self.cuda_sync = cuda_sync
+
+    def tick(self, name:str):
+        if name not in self.tick_time:
+            self.cnt_time[name] = 0
+            self.total_time[name] = 0        
+        self.tick_time[name] = time.time()
+        
+    def tock(self, name:str):
+        if name in self.tick_time:
+            if self.cuda_sync:
+                torch.cuda.synchronize()
+            self.cnt_time[name] += 1
+            self.total_time[name] += (time.time() - self.tick_time[name])    
+
+    def __str__(self) -> str:
+        return str(self.total_time) + '\n' + str(self.cnt_time)        

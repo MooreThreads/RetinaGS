@@ -18,7 +18,7 @@ try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = False
 except ImportError:
-    TENSORBOARD_FOUND = False
+    TENSORBOARD_FOUND = False  
 
 def render_wrapper(viewpoint_cam, gaussians, pipe, background):
     viewpoint_cam.to_device('cuda')
@@ -50,8 +50,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     progress_bar = tqdm(range(first_iter, opt.epochs*len(train_dataset)), desc="Training progress")
     NUM_EPOCH = opt.epochs
     first_iter += 1 # origin code add 1 to avoid corner cases on iteration 0, we just follow it
-    train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene.get_batch)
+    train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, 
+                              collate_fn=SimpleScene.get_batch, pin_memory=True, pin_memory_device='cuda')
     iteration = first_iter
+
+    train_data_list = []
+    for _i, ids_data in enumerate(train_loader):
+        if True:
+            data = ids_data
+            data_gpu = [_cmr.to_device('cuda') for _cmr in data]
+            train_data_list.append(data_gpu)
 
     print('start of profiling')
     with torch.profiler.profile(
@@ -59,9 +67,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA,
         ],
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(os.path.join(
+            scene.model_path, 'profiler'
+        )),
     ) as p:
         for i_epoch in range(NUM_EPOCH):
-            for data in train_loader:
+            for data in train_data_list:
                 # Pick a random Camera
                 with record_function("custom_forward"):
                     viewpoint_cam = data[0]
@@ -74,22 +85,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gt_image = viewpoint_cam.original_image.cuda()
                     Ll1 = l1_loss(image, gt_image)
                     loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-                
+                    torch.cuda.synchronize()
+
                 with record_function("custom_backward"):
                     loss.backward()
-                    shape = gaussians._xyz.grad.shape
+                    torch.cuda.synchronize()
 
                 p.step()
                 progress_bar.update(1)
                 iteration += 1
     progress_bar.close()
 
-    table = p.key_averages().table(sort_by="cuda_time_total", row_limit=20, max_src_column_width=200) 
+    table = p.key_averages().table(sort_by="cpu_time_total", row_limit=-1, max_src_column_width=200) 
     print(table)
     current_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())   
-    p.export_chrome_trace(os.path.join(
-        dataset.model_path, 'profile_{}.json'.format(current_time))
-        )   
+    # p.export_chrome_trace(os.path.join(
+    #     dataset.model_path, 'profile_{}.json'.format(current_time))
+    #     )   
     with open(os.path.join(
         dataset.model_path, 'profile_{}.txt'.format(current_time)
     ), 'w') as f:

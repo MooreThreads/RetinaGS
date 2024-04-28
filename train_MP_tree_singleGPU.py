@@ -461,7 +461,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             del train_loader
         train_loader = DataLoader(train_dataset, 
                                   batch_size=1, num_workers=16, prefetch_factor=2, drop_last=False,
-                                  shuffle=True, collate_fn=SceneV3.get_batch)
+                                  shuffle=True, collate_fn=SceneV3.get_batch, pin_memory=True, pin_memory_device='cuda')
         t_iter_end = time.time()
 
         gaussians_group.update_learning_rate(iteration)  #  - ply_iteration

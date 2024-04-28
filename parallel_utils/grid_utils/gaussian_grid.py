@@ -298,7 +298,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 
     for i in tqdm(range(len(train_dataset))):
         camera = train_dataset.get_empty_item(idx=i)    # only need view frustum
-        assert isinstance(camera, (Camera, EmptyCamera))
+        # assert isinstance(camera, (Camera, EmptyCamera))
         # get the depth of all nodes
         all_node_depth = {'':0}
         for path,node in path2nodes.items():
@@ -347,7 +347,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 def get_relation_vector(camera:Camera, z_near:float, z_far, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger):
     NUM_DATA, NUM_MODEL = 1, len(sorted_leaf_nodes)
     complete_relation = np.zeros((NUM_DATA, NUM_MODEL), dtype=int) - 1
-    assert isinstance(camera, (Camera, EmptyCamera))
+    # assert isinstance(camera, (Camera, EmptyCamera))
     # get the depth of all nodes
     all_node_depth = {'':0}
     for path,node in path2nodes.items():

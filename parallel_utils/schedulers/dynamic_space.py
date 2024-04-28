@@ -312,6 +312,117 @@ class BasicSchedulerwithDynamicSpace:
         # scheduler is mainly design for communication, let user control the blending 
         return main_rank_tasks, render_rets, extra_render_rets
     
+    def render_pass(self, func_render:callable, modelId2rank:dict, _task_main_rank:torch.tensor, _relation_matrix:torch.tensor, views:list):
+        send_tasks, recv_tasks, render_tasks, main_rank_tasks = self.task_parser.parse_task_tensor(
+            modelId2rank=modelId2rank,
+            _task_main_rank = _task_main_rank,
+            _relation_matrix = _relation_matrix,
+            tasks_message=views
+        )
+        if self.logger is not None:
+            self._log_matching_result(send_tasks, recv_tasks, render_tasks, main_rank_tasks)
+        
+        # local render_pass:  
+        t0 = time.time()
+        render_rets = {(t.task_id, t.model_id): None for t in render_tasks}
+        for t in render_tasks:
+            self.logger.debug('render {}'.format((t.task_id, t.model_id)))
+            render_rets[(t.task_id, t.model_id)] = func_render(t)
+        t1 = time.time() 
+        self.render_pass_cost += (t1-t0)  
+        if self.tb_writer is not None:
+            self.tb_writer.add_scalar('cnt/render_pass', t1-t0, self._cnt)
+            
+        # scheduler is mainly design for communication, let user control the blending 
+        return render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks
+    
+    def render_batch_pass(self, func_render:callable, modelId2rank:dict, _task_main_rank:torch.tensor, _relation_matrix:torch.tensor, views:list):
+        # func_render shall accept: a model_id, a list of render_task with the same model_id
+        send_tasks, recv_tasks, render_tasks, main_rank_tasks = self.task_parser.parse_task_tensor(
+            modelId2rank=modelId2rank,
+            _task_main_rank = _task_main_rank,
+            _relation_matrix = _relation_matrix,
+            tasks_message=views
+        )
+        if self.logger is not None:
+            self._log_matching_result(send_tasks, recv_tasks, render_tasks, main_rank_tasks)
+        
+        # local render_pass:  
+        t0 = time.time()
+        model_id2render_tasks = {}
+        for _i in range(len(render_tasks)):
+            t:RenderTask = render_tasks[_i]
+            if t.model_id not in model_id2render_tasks:
+                model_id2render_tasks[t.model_id] = []
+            model_id2render_tasks[t.model_id].append(t)   
+
+        model_id2render_batch = {}
+        for model_id in model_id2render_tasks:
+            model_id2render_batch[model_id] = func_render(model_id, model_id2render_tasks[model_id])
+
+        render_rets = {}     
+        for model_id in model_id2render_tasks:
+            render_tasks:list = model_id2render_tasks[model_id]
+            render_batch:list = model_id2render_batch[model_id]
+            for _i in range(len(render_tasks)):
+                t:RenderTask = render_tasks[_i]
+                ret:dict = render_batch[_i]
+                render_rets[(t.task_id, t.model_id)] = ret
+   
+        t1 = time.time() 
+        self.render_pass_cost += (t1-t0)  
+        if self.tb_writer is not None:
+            self.tb_writer.add_scalar('cnt/render_pass', t1-t0, self._cnt)
+            
+        # scheduler is mainly design for communication, let user control the blending 
+        return render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks
+
+    def comm_pass(self, render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks, batch_isend_irecv_version=None):
+        if batch_isend_irecv_version is None:
+            batch_isend_irecv_version = self.batch_isend_irecv_version
+        batched_send_recv:callable = BATCHED_SEND_RECV_DICT[batch_isend_irecv_version] 
+        # communication_pass:
+        # 1) pack_up_render_result and assign storage space for receiving
+        send_tensors = {
+            (s.task_id, s.model_id): self.func_pack_up(render_rets[(s.task_id, s.model_id)]) 
+                for s in send_tasks
+        } 
+        recv_tensors = {
+            (r.task_id, r.model_id): self.func_space(r) for r in recv_tasks
+        }
+        # 2) batched_p2p
+        # TaskParser organizes send/recv in (task_id, model_id) order
+        # thus simply using the order of tasks as the order of the isend/irecv can work
+        send_ops = [ 
+            (send_tensors[(s.task_id, s.model_id)], s.dst_rank, None) for s in send_tasks
+        ]
+        recv_ops = [
+            (recv_tensors[(r.task_id, r.model_id)], r.src_rank, None) for r in recv_tasks
+        ]
+        t0 = time.time()
+        batched_send_recv(send_tasks=send_ops, recv_tasks=recv_ops, logger=self.logger)
+        t1 = time.time()
+        del send_tensors
+
+        self.send_recv_forward_cost += (t1-t0)
+        if self.tb_writer is not None:
+            self.tb_writer.add_scalar('cnt/send_recv_forward', t1-t0, self._cnt)
+            self.logger.debug('cnt/send_recv_forward {}, {}'.format(t1-t0, self._cnt))
+        
+        # 3) unpack_up extra render_result from other ranks
+        extra_render_rets = {
+            (r.task_id, r.model_id): self.func_unpack_up(recv_tensors[(r.task_id, r.model_id)]) 
+                for r in recv_tasks
+        }
+        del recv_tensors
+
+        self.saved_for_backward_dict['send_tasks'] = send_tasks
+        self.saved_for_backward_dict['recv_tasks'] = recv_tasks
+        self.saved_for_backward_dict['render_tasks'] = render_tasks
+        self.saved_for_backward_dict['main_rank_tasks'] = main_rank_tasks
+
+        return extra_render_rets
+
     def __loss_pass(self, *args, **kwargs):
         # I hope this joke can relax the pepole reading these codes
         raise NotImplementedError('this scheduler is mainly design for communication :(, please calculate loss by yourself :)')
@@ -479,8 +590,8 @@ def minimal_send_recv_GS(
     return self_recv_buffer, recv_gs_task2space
 
 
-def divide_scene_3d_grid(scene_3d_grid:ppu.Grid3DSpace, bvh_depth, SPLIT_ORDERS):
-    path2bvh_nodes = ppu.build_BvhTree_on_3DGrid(scene_3d_grid, max_depth=bvh_depth, split_orders=SPLIT_ORDERS)
+def divide_scene_3d_grid(scene_3d_grid:ppu.Grid3DSpace, bvh_depth, SPLIT_ORDERS, example_path2bvh_nodes={}, logger=None):
+    path2bvh_nodes = ppu.build_BvhTree_on_3DGrid(scene_3d_grid, max_depth=bvh_depth, split_orders=SPLIT_ORDERS, example_path2bvh_nodes=example_path2bvh_nodes, logger=logger)
     # find leaf-nodes as model space
     sorted_leaf_nodes = []
     for path in path2bvh_nodes:
@@ -496,7 +607,7 @@ def divide_scene_3d_grid(scene_3d_grid:ppu.Grid3DSpace, bvh_depth, SPLIT_ORDERS)
 
 
 def eval_load_and_divide_grid_dist(
-        src_gaussians_group:BoundedGaussianModelGroup,
+        src_gaussians_group:BoundedGaussianModelGroup, scr_path2bvh_nodes:dict,
         src_model2box:dict, src_model2rank:dict, src_local_model_ids:list,
         scene_3d_grid:ppu.Grid3DSpace, 
         space_task_parser:SpaceTaskMatcher,
@@ -542,7 +653,7 @@ def eval_load_and_divide_grid_dist(
 
         # new partition of space  
         if RANK == 0:
-            path2bvh_nodes, sorted_leaf_nodes, tree_str = divide_scene_3d_grid(scene_3d_grid, BVH_DEPTH, SPLIT_ORDERS)
+            path2bvh_nodes, sorted_leaf_nodes, tree_str = divide_scene_3d_grid(scene_3d_grid, BVH_DEPTH, SPLIT_ORDERS, example_path2bvh_nodes=scr_path2bvh_nodes, logger=logger)
             logger.info(f'get tree\n{tree_str}')
             if len(sorted_leaf_nodes) != 2**BVH_DEPTH:
                 logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}') 

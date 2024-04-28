@@ -109,7 +109,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
     for i, batch in tqdm(enumerate(data_loader)):
         for _data in batch:
             _max_depth, _relation_1_N, camera = _data
-            assert isinstance(camera, (Camera, EmptyCamera))
+            # assert isinstance(camera, (Camera, EmptyCamera))
             assert camera.uid == idx_start
             complete_relation[idx_start, :] = _relation_1_N
             if i%100 == 0:
@@ -203,11 +203,10 @@ def prepare_output_and_logger(args, all_args):
 
     return tb_writer, logger
 
-def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
-    view_messages = [ViewMessage(e, id=int(_id)) for e, _id in zip(packages, cameraUid_taskId_mainRank[:,1])]  
+def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
     task_id2cameraUid, uid2camera, task_id2camera = {}, {}, {}
     for camera in cams_gpu:
-        assert isinstance(camera, Camera)
+        # assert isinstance(camera, Camera)
         uid2camera[camera.uid] = camera 
     logger.info(uid2camera)    
     for row in cameraUid_taskId_mainRank:
@@ -215,7 +214,7 @@ def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, c
         task_id2cameraUid[tid] = uid
         task_id2camera[tid] = uid2camera[uid]
         
-    return view_messages, task_id2cameraUid, uid2camera, task_id2camera
+    return task_id2cameraUid, uid2camera, task_id2camera
 
 def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, opt, pipe, logger: logging.Logger):
     t0 = time.time() 
@@ -354,18 +353,18 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # rank 0 samples cameras and broadcast the data 
         t0 = time.time()
         cameraUid_taskId_mainRank = torch.zeros((batch_size, 3), dtype=torch.int, device='cuda') 
-        packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
+        # packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
         data_gpu = [_cmr.to_device('cuda') for _cmr in data]
         if RANK == 0:  
             for i, camera in enumerate(data_gpu):
                 cameraUid_taskId_mainRank[i, 0] = camera.uid
                 cameraUid_taskId_mainRank[i, 1] = iteration + i
                 cameraUid_taskId_mainRank[i, 2] = 0
-                packages[i] = camera.pack_up(device='cuda')
+                # packages[i] = camera.pack_up(device='cuda')
         dist.broadcast(cameraUid_taskId_mainRank, src=0, async_op=False, group=None)
         logger.info('broadcast cameraUid_taskId_mainRank {}, iteration {}'.format(cameraUid_taskId_mainRank, iteration))
-        dist.broadcast(packages, src=0, async_op=False, group=None)
-        logger.info('broadcast packages, iteration {}'.format(iteration))
+        # dist.broadcast(packages, src=0, async_op=False, group=None)
+        # logger.info('broadcast packages, iteration {}'.format(iteration))
         dist.barrier()   
         t1 = time.time()
         broadcast_task_cost += (t1-t0)
@@ -374,14 +373,14 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # end of broadcast and sync, unpack training-data
         t0 = time.time()
         cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
-        view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
+        task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, data_gpu, logger)
         t1 = time.time()
         data_cost += (t1-t0)
         if tb_writer:
             tb_writer.add_scalar('cnt/prepare_data', t1-t0, iteration) 
 
         # logger.info(task_id2camera)
-        mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
+        mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in data_gpu])
         _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
         logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
         # default debug_from is -1, never debug
@@ -395,7 +394,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
             modelId2rank=model_id2rank,
             _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
             _relation_matrix=train_rlt[_uids, :],
-            views=view_messages)
+            views=data_gpu)
         t1 = time.time()
         if tb_writer:
             tb_writer.add_scalar('cnt/forward_pass', t1-t0, iteration)
@@ -421,6 +420,11 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
                     local_render_rets[k]['render'], 
                     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
                     )
+                torchvision.utils.save_image(
+                    local_render_rets[k]['alpha'], 
+                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
+                )
+
             for k in extra_render_rets:
                 task_id, model_id = k
                 ori_camera:Camera = task_id2camera[task_id]
@@ -429,6 +433,10 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
                     extra_render_rets[k]['render'], 
                     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
                 )
+                torchvision.utils.save_image(
+                    extra_render_rets[k]['alpha'], 
+                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
+                )
 
         if (len(images)>0) and RANK==0:
             k = list(images.keys())[0]
@@ -436,9 +444,9 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
             image = images[k]['render']
             image = torch.clamp(image, 0.0, 1.0)
             ori_camera:Camera = task_id2camera[task_id]
-            # gt_image = ori_camera.original_image.to('cuda')
+            gt_image = ori_camera.original_image.to('cuda')
             torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(ori_camera.uid, iteration) + ".png"))
-            # torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))    
+            torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))    
 
         iter_end.record()
         torch.cuda.synchronize()
@@ -447,11 +455,11 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # Progress bar
         if dist.get_rank() == 0:
             progress_bar.update(batch_size)
-            if iteration >= opt.iterations:
-                progress_bar.close()
+            # if iteration >= opt.iterations:
+            #     progress_bar.close()
                 
         step += 1
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         t_iter_end = time.time()
 
     # after traversing dataset

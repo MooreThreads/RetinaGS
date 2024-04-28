@@ -69,6 +69,7 @@ class PipelineParams(ParamGroup):
         self.debug = False
         self.max_batch_size = 2
         self.max_load = 2
+        self.render_version = 'default'
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):

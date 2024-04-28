@@ -9,7 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-import torch
+import torch, math
 import numpy as np
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
@@ -22,7 +22,9 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_renderer.render import render
 from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
-from scene.cameras import ViewMessage, Camera
+from gaussian_renderer.render_metric import render_with_GradNormHelper as render_metric
+import gaussian_renderer.pytorch_gs_render.pytorch_render as pytorch_render
+from scene.cameras import ViewMessage, Camera, Patch
 
 
 class GaussianModel2(nn.Module):
@@ -67,6 +69,7 @@ class GaussianModel2(nn.Module):
         self.range_up = torch.tensor(range_up, dtype=torch.float32).to(self.device)
 
         self._all_features = None 
+        self._xyz_home = None
 
     def capture(self):
         return (
@@ -117,6 +120,14 @@ class GaussianModel2(nn.Module):
         return self._xyz
     
     @property
+    def get_xyz_hom(self):
+        if self._xyz_home is not None:
+            return self._xyz_home
+        else:
+            self._xyz_home = torch.cat([self.get_xyz, torch.ones_like(self._opacity)], dim=-1)
+            return self._xyz_home 
+
+    @property
     def get_features(self):
         if self._all_features is not None:
             return self._all_features
@@ -127,7 +138,8 @@ class GaussianModel2(nn.Module):
             return self._all_features
 
     def clean_cached_features(self):
-        self._all_features = None    
+        self._all_features = None 
+        self._xyz_home = None   
     
     @property
     def get_opacity(self):
@@ -474,9 +486,13 @@ class GaussianModel2(nn.Module):
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
+    def __add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+
+    def add_densification_stats(self, viewspace_point_tensor, update_filter):
+        self.xyz_gradient_accum[update_filter] += torch.abs(self._means2D_meta.grad[update_filter])
+        self.denom[update_filter] += 1    
 
     def add_densification_stats_ddp(self, viewspace_point_tensor, visibility_filter_total, update_cnt):
         # grad is already average/summed, so we just add it
@@ -516,6 +532,26 @@ class GaussianModel2(nn.Module):
     def forward(self, viewpoint_cam, pipe, background):
         return render(viewpoint_cam, self, pipe, background)            
 
+def create_batch(patches:list):
+    # assume all patch has the same complete shape
+    batch_data, batch_size = {}, len(patches)
+    example_p:Patch = patches[0]
+    H, W = example_p.complete_height, example_p.complete_width
+
+    batch_data['packed_views'] = torch.stack([p.pack_up() for p in patches])
+    max_tile_num = max([len(p.all_tiles) for p in patches]) 
+    batch_data['tile_maps'] = torch.zeros((batch_size, max_tile_num), dtype=torch.int, device='cuda')
+    batch_data['tile_nums'] = []
+    for i in range(batch_size):
+        p:Patch = patches[i]
+        num_valid_tile = len(p.all_tiles)
+        batch_data['tile_maps'][i, :num_valid_tile] = p.all_tiles
+        batch_data['tile_nums'].append(num_valid_tile)
+    batch_data['tile_maps_sizes'] = torch.tensor([math.ceil(W/16), math.ceil(H/16)], device='cuda').view(-1, 2).repeat(batch_size, 1)    
+    batch_data['tile_maps_sizes_list'] = [math.ceil(W/16), math.ceil(H/16)]
+    batch_data['image_size_list'] = [math.ceil(W), math.ceil(H)]
+    batch_data['patches_cpu'] = patches  # it's okay to use patch on gpu 
+    return batch_data
 
 class BoundedGaussianModel(GaussianModel2):
     def __init__(self, sh_degree: int, range_low=[0, 0, 0], range_up=[0, 0, 0], device="cuda", max_size:int=None):
@@ -523,19 +559,36 @@ class BoundedGaussianModel(GaussianModel2):
         self.max_size = max_size
 
     def forward(self, viewpoint_cam, pipe, background, need_buffer:bool=False):
-        all_ret = render4BoundedGaussianModel(viewpoint_cam, self, pipe, background)   
-        if need_buffer:
-            return all_ret
+        
+        if pipe.render_version == 'default':
+            all_ret = render4BoundedGaussianModel(viewpoint_cam, self, pipe, background)   
+            if need_buffer:
+                return all_ret
+            else:
+                return {
+                    "render": all_ret["render"],
+                    "viewspace_points": all_ret["viewspace_points"],
+                    "visibility_filter": all_ret["visibility_filter"],
+                    "radii": all_ret["radii"],
+                    "depth": all_ret["depth"],
+                    "alpha": all_ret["alpha"],
+                    "num_rendered": all_ret["num_rendered"],
+                }
+        elif pipe.render_version == '3d_gs':
+            # we need alpha map, thus use render metric 
+            ret = render_metric(viewpoint_cam, self, pipe, background)    
+            return ret
+        elif pipe.render_version == 'pytorch_render':
+            # this is not a goot way to call pytorch_render_raster
+            # but it is simple and suitable for testing
+            assert isinstance(viewpoint_cam, Camera)
+            patch = Patch(viewpoint_cam, uid=0, 
+                          v_start=0, u_start=0,
+                          v_end=viewpoint_cam.image_height, u_end=viewpoint_cam.image_width)
+            batch = create_batch([patch])
+            return pytorch_render.render(self, batch_data=batch)[0]
         else:
-            return {
-                "render": all_ret["render"],
-                "viewspace_points": all_ret["viewspace_points"],
-                "visibility_filter": all_ret["visibility_filter"],
-                "radii": all_ret["radii"],
-                "depth": all_ret["depth"],
-                "alpha": all_ret["alpha"],
-                "num_rendered": all_ret["num_rendered"],
-            }
+            raise NotImplementedError('not render of version {}'.format(pipe.render_version))
     
     def add_densification_stats(self, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.abs(self._means2D_meta.grad[update_filter])

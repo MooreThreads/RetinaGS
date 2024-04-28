@@ -55,7 +55,7 @@ def loadEmptyCam(args, id, cam_info, resolution_scale):
     if cam_info.image is not None:
         orig_w, orig_h = cam_info.image.size
     else:
-        orig_w, orig_h = 0, 0 
+        orig_w, orig_h = cam_info.width, cam_info.height 
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))

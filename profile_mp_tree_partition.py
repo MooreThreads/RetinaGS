@@ -19,7 +19,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
 from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch
-from utils.workload_utils import NaiveWorkloadBalancer
+from utils.workload_utils import NaiveWorkloadBalancer, NaiveTimer
 
 import parallel_utils.schedulers.dynamic_space as psd 
 import parallel_utils.grid_utils.core as pgc
@@ -143,7 +143,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
     for i, batch in tqdm(enumerate(data_loader)):
         for _data in batch:
             _max_depth, _relation_1_N, camera = _data
-            assert isinstance(camera, (Camera, EmptyCamera))
+            # assert isinstance(camera, (Camera, EmptyCamera))
             assert camera.uid == idx_start
             complete_relation[idx_start, :] = _relation_1_N
             if i%100 == 0:
@@ -191,7 +191,7 @@ def get_sampler_indices_dist(train_dataset:CameraListDataset, seed:int):
         positions[i, :] = train_dataset.get_empty_item(i).camera_center
 
     if RANK == 0:
-        seed = np.random.randint(1000)
+        # seed = np.random.randint(1000)
         g = torch.Generator()
         g.manual_seed(seed)
         indices_gpu = torch.randperm(len(train_dataset), generator=g, dtype=torch.int).to('cuda')
@@ -506,7 +506,6 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     logger.info('start from epoch {}'.format(start_epoch))
     NUM_EPOCH = opt.epochs - start_epoch
 
-    progress_bar = tqdm(range(first_iter, NUM_EPOCH*len(train_dataset)), desc="Training progress") if RANK == 0 else None 
     indices:list = get_sampler_indices_dist(train_dataset=train_dataset, seed=0)
     groups = get_grouped_indices_dist(model2rank=model_id2rank, relation_matrix=train_rlt, shuffled_indices=indices, 
                     max_task=MAX_LOAD, max_batch=MAX_BATCH_SIZE)   
@@ -514,9 +513,22 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     logger.info("build groups of data items")
     train_loader = DataLoader(grouped_train_dataset, 
                         batch_size=1, num_workers=2, prefetch_factor=2, drop_last=True,
-                        shuffle=False, collate_fn=SceneV3.get_batch)
+                        shuffle=False, collate_fn=SceneV3.get_batch, pin_memory=True, pin_memory_device='cuda')
     gaussians_group.set_SHdegree(3)
+    current_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) 
 
+    # load some data to gpu 
+    train_data_list = []
+    for _i, ids_data in enumerate(train_loader):
+        if True:
+            ids, data = ids_data[0]
+            data_gpu = [_cmr.to_device('cuda') for _cmr in data]
+            train_data_list.append(data_gpu)
+    progress_bar = tqdm(range(first_iter, NUM_EPOCH*len(train_dataset)), desc="Training progress") if RANK == 0 else None         
+
+    dist.barrier()   
+    torch.cuda.synchronize(); 
+ 
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -526,54 +538,62 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             scene.model_path, 'profiler'
         )),
     ) as p:
+        t0 = time.time()
         for _i_epoch in range(NUM_EPOCH):
             i_epoch = _i_epoch + start_epoch
-            t_iter_end = time.time()
             gaussians_group.update_learning_rate(iteration)  #  - ply_iteration
-            for ids_data in train_loader:
-                ids, data = ids_data[0] # [(tuple(int), tuple(camera))]
-                batch_size = len(data)  # list of Camera/None, batchsize can be dynamic in the future    
-                assert batch_size > 0, "get empty group"             
-                iter_start.record()
-                # update state by batch but not iteration 
-                gaussians_group.clean_cached_features()
-        
-                # rank 0 samples cameras and broadcast the data 
-                cameraUid_taskId_mainRank = torch.zeros((batch_size, 3), dtype=torch.int, device='cuda') 
-                packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
-                data_gpu = [_cmr.to_device('cuda') for _cmr in data]
-                if RANK == 0:  
-                    for i, camera in enumerate(data_gpu):
-                        cameraUid_taskId_mainRank[i, 0] = camera.uid
-                        cameraUid_taskId_mainRank[i, 1] = iteration + i
-                        cameraUid_taskId_mainRank[i, 2] = i % WORLD_SIZE
-                        # cameraUid_taskId_mainRank[i, 2] = assign_task2rank_dist(train_rlt[camera.uid, :], i)
-                        packages[i] = camera.pack_up(device='cuda')
 
-                with record_function("broadcast_data"):        
+            for data_gpu in train_data_list:
+                with record_function("custom_control_info"):
+                    batch_size = len(data_gpu)  # list of Camera/None, batchsize can be dynamic in the future    
+                    assert batch_size > 0, "get empty group"             
+                    iter_start.record()
+                    # update state by batch but not iteration 
+                    gaussians_group.clean_cached_features()
+            
+                    # rank 0 samples cameras and broadcast the data 
+                    cameraUid_taskId_mainRank = torch.zeros((batch_size, 3), dtype=torch.int, device='cuda') 
+                    packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
+                    if RANK == 0:  
+                        for i, camera in enumerate(data_gpu):
+                            cameraUid_taskId_mainRank[i, 0] = camera.uid
+                            cameraUid_taskId_mainRank[i, 1] = iteration + i
+                            cameraUid_taskId_mainRank[i, 2] = i % WORLD_SIZE
+                            # cameraUid_taskId_mainRank[i, 2] = assign_task2rank_dist(train_rlt[camera.uid, :], i)
+                            packages[i] = camera.pack_up(device='cuda')
+                    torch.cuda.synchronize(); 
+
+                with record_function("custom_broadcast_data"):        
                     dist.broadcast(cameraUid_taskId_mainRank, src=0, async_op=False, group=None)
                     logger.info('broadcast cameraUid_taskId_mainRank {}, iteration {}'.format(cameraUid_taskId_mainRank, iteration))
                     dist.broadcast(packages, src=0, async_op=False, group=None)
                     logger.info('broadcast packages, iteration {}'.format(iteration))
                     dist.barrier()   
-               
-                cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
-                view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
-               
-                # logger.info(task_id2camera)
-                mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
-                _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
-                logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
+                    torch.cuda.synchronize(); 
 
-                # render contents and exchange them between ranks
-                with record_function("custom_forward"): 
-                    main_rank_tasks, local_render_rets, extra_render_rets = scheduler.forward_pass(
+                with record_function('custom_forward'):
+                    cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
+                    view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
+                
+                    # logger.info(task_id2camera)
+                    mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
+                    _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
+                    logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
+
+                    local_render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks = scheduler.render_pass(
                         func_render=render_func,
                         modelId2rank=model_id2rank,
                         _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
                         _relation_matrix=train_rlt[_uids, :],
                         views=view_messages)
-             
+                    torch.cuda.synchronize(); 
+
+                with record_function('custom_sr_forward'):
+                    extra_render_rets = scheduler.comm_pass(local_render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks)
+                    torch.cuda.synchronize(); 
+
+                # grad from loss to local/extra render_results  
+                with record_function("custom_img_backward"):
                     # use copy of local render_ret to bledner, so that first auto_grad can be faster
                     local_render_rets_copy = pgc.make_copy_for_blending(main_rank_tasks, local_render_rets)
                     logger.debug("copy {} local render_rets for main rank task".format(len(local_render_rets_copy)))
@@ -581,9 +601,12 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     for m in main_rank_tasks:
                         relation_vector = train_rlt[task_id2cameraUid[m.task_id], :]
                         images[(m.task_id, m.rank)] = local_func_blender(local_render_rets_copy, extra_render_rets, m, relation_vector)
+                        # save rgb images
+                        # image = images[(m.task_id, m.rank)]['render']
+                        # image = torch.clamp(image, 0.0, 1.0)
+                        # ori_camera:Camera = task_id2camera[m.task_id]
+                        # torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(ori_camera.uid, iteration) + ".png"))
 
-                # grad from loss to local/extra render_results  
-                with record_function("custom_img_backward"):
                     loss_main_rank, Ll1_main_rank = torch.tensor(0.0, device='cuda'), torch.tensor(0.0, device='cuda')
                     if len(main_rank_tasks) > 0: 
                         loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss = gather_image_loss(
@@ -596,55 +619,55 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     else:
                         _t_gather, _t_loss, _t_image_grad = 0, 0, 0
                         logger.debug('no main_rank image ret, also no need to backward')    
-                
+                    torch.cuda.synchronize(); 
+
                 # exchange gradient symmetrically with exchange render-contents
                 # gradients shall be registered to the tensors in extra_render_rets
+                
                 with record_function("custom_grad_exchange"):
                     grad_from_other_rank = scheduler.backward_pass(extra_render_rets)
-              
+                    torch.cuda.synchronize();
+
                 # grad from local/extra render_results to GS.modelParameters
-                send_tasks = scheduler.saved_for_backward_dict['send_tasks']
-                send_local_tensor, extra_gard, main_local_tensor, main_grad = pgc.gather_tensor_grad_of_render_result(send_tasks, local_render_rets, grad_from_other_rank, local_render_rets_copy)
-                
-                with record_function("custom_model_backward"):
+                with record_function('custom_model_backward'):
+                    send_tasks = scheduler.saved_for_backward_dict['send_tasks']
+                    send_local_tensor, extra_gard, main_local_tensor, main_grad = pgc.gather_tensor_grad_of_render_result(send_tasks, local_render_rets, grad_from_other_rank, local_render_rets_copy)
                     logger.debug('seconda autograd in iteration {}, for {} main local grad, {} extra grad'.format(iteration, len(main_grad), len(extra_gard)))
                     if (len(main_grad) + len(extra_gard)) > 0:
                         torch.autograd.backward(main_local_tensor + send_local_tensor, main_grad + extra_gard) 
                     else:
                         logger.warning('iteration {}, find no main grad nor extra grad'.format(iteration))  
-                
-                iter_end.record()
-                torch.cuda.synchronize()
-                iter_time = iter_start.elapsed_time(iter_end)
-                
-                with torch.no_grad():
-                    # Progress bar
-                    if dist.get_rank() == 0:
-                        ema_loss_for_log = 0.4 * loss_main_rank.item() + 0.6 * ema_loss_for_log
-                        progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
-                        progress_bar.update(batch_size)
-                # logger.info(f'end of {iteration}')empty_cache
-                iteration += batch_size
-                step += 1
-                gaussians_group.clean_cached_features()
-                # torch.cuda.empty_cache()
-                t_iter_end = time.time()
-                p.step()
+                                
+                    with torch.no_grad():
+                        # Progress bar
+                        if dist.get_rank() == 0:
+                            progress_bar.update(batch_size)
+                    iteration += batch_size
+                    step += 1
+                    gaussians_group.clean_cached_features()
+                    t_iter_end = time.time()
+                    torch.cuda.synchronize()
 
+                p.step()
             # after traversing dataset
-            scheduler.record_info() 
-    
+        logger.info('profile time {}'.format(time.time() - t0))
+    scheduler.record_info() 
     if RANK == 0:
         progress_bar.close()
-    table = p.key_averages().table(sort_by="cuda_time_total", row_limit=40, max_src_column_width=200) 
-    current_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime())   
-    p.export_chrome_trace(os.path.join(
-        dataset_args.model_path, 'profile_{}.json'.format(current_time))
-        )
+    table_cuda = p.key_averages().table(sort_by="cuda_time_total", row_limit=-1, max_src_column_width=200)   
+    table_cpu = p.key_averages().table(sort_by="cpu_time_total", row_limit=-1, max_src_column_width=200) 
+    # p.export_chrome_trace(os.path.join(
+    #     dataset_args.model_path, 'profile_{}.json'.format(current_time))
+    #     )
     with open(os.path.join(
-        dataset_args.model_path, 'profile_{}.txt'.format(current_time)
+        dataset_args.model_path, 'profile_cuda_{}.txt'.format(current_time)
     ), 'w') as f:
-        f.writelines(table)  
+        f.writelines(table_cuda)  
+
+    with open(os.path.join(
+        dataset_args.model_path, 'profile_cpu_{}.txt'.format(current_time)
+    ), 'w') as f:
+        f.writelines(table_cpu)      
 
     # after all iterations
     logger.info('all time cost in broadcast_task {}'.format(broadcast_task_cost))
@@ -695,6 +718,7 @@ if __name__ == "__main__":
     parser.add_argument("--SKIP_SPLIT", action='store_true', default=False)
     parser.add_argument("--SKIP_CLONE", action='store_true', default=False)
     parser.add_argument("--PERCEPTION_LOSS", action='store_true', default=False)
+    parser.add_argument("--name", type=str, default = '')
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -708,7 +732,10 @@ if __name__ == "__main__":
     MASTER_ADDR = os.environ["MASTER_ADDR"]
     MASTER_PORT = os.environ["MASTER_PORT"]
 
-    args.model_path = os.path.join(args.model_path, 'rank_{}'.format(RANK))
+    time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) 
+    tag = time_str if len(args.name) <= 0 else args.name
+    args.model_path = os.path.join(args.model_path, 'rank_{}_of_{}_{}'.format(RANK, WORLD_SIZE, tag))
+    torch.multiprocessing.set_start_method('spawn')
     print("Optimizing " + args.model_path)
 
     assert WORLD_SIZE <= 2**args.bvh_depth
