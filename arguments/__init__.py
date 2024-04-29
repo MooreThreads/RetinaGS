@@ -106,7 +106,23 @@ class OptimizationParams(ParamGroup):
         self.densify_until_epoch = 200
         self.save_epoch_interval = -1
         self.eval_epoch_interval = 10
+        self.visualization_epoch_interval = 100
+        self.number_visualization = 5
         self.max_gaussians = 40_000_000
+        self.scales_reg_enable = False
+        self.scales_reg_lr = 0.01
+        self.scales_reg_sum_enable = False
+        self.scales_reg_sum_lr = 0.01
+        self.scales_reg_square_sum_enable = False
+        self.scales_reg_square_sum_lr = 0.01
+        self.lr_scales_schedule = False
+        self.perception_loss = False
+        self.perception_net_type = "vgg"
+        self.perception_net_version = "0.1"
+        self.lambda_perception = 0.1
+        self.huber_loss_replacement_enable = False
+        self.only_prune_via_screen_space_enable = False     
+        self.screen_size_threshold   = 20
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

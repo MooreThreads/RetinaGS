@@ -218,9 +218,11 @@ int CudaRasterizer_metric::Rasterizer::forward(
 	float* out_depth,
 	float* out_cnt,
 	double* out_cnt2,
+	double* out_cnt3,
 	float* out_alpha,
 	int* radii,
 	double* area_2d,
+	double* area_2d_2,
 	bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -267,6 +269,7 @@ int CudaRasterizer_metric::Rasterizer::forward(
 		tan_fovx, tan_fovy,
 		radii,
 		area_2d,
+		area_2d_2,
 		geomState.means2D,
 		geomState.depths,
 		geomState.cov3D,
@@ -331,6 +334,7 @@ int CudaRasterizer_metric::Rasterizer::forward(
 		width, height,
 		geomState.means2D,
 		area_2d,
+		area_2d_2,
 		feature_ptr,
 		geomState.depths,
 		geomState.conic_opacity,
@@ -340,7 +344,8 @@ int CudaRasterizer_metric::Rasterizer::forward(
 		out_color,
 		out_depth,
 		out_cnt,
-		out_cnt2), debug);
+		out_cnt2,
+		out_cnt3), debug);
 
 	return num_rendered;
 }

@@ -150,17 +150,17 @@ def fetchPly(path, pointcloud_sample_rate=1):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    # normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
     if pointcloud_sample_rate != 1:
         num_samples = int(positions.shape[0]/pointcloud_sample_rate)
         sampled_indices = np.random.choice(positions.shape[0], num_samples, replace=False)
         positions = positions[sampled_indices]
         colors = colors[sampled_indices]
-        normals = normals[sampled_indices]
+        # normals = normals[sampled_indices]
         print("Random Sample Done!")
         print(positions.shape)
         
-    return BasicPointCloud(points=positions, colors=colors, normals=normals)
+    return BasicPointCloud(points=positions, colors=colors, normals=None)
 
 def storePly(path, xyz, rgb):
     # Define the dtype for the structured array
@@ -303,6 +303,55 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, 
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=None)
+    return scene_info
+
+def readCustomScanNetCameraInfo(path, pointcloud_sample_rate=1, points3D="points3D"):
+    try:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.txt")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
+    reading_dir = "images"
+    cam_infos_unsorted = readColmapEmptyCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+
+    # split train and test via train_test_lists.json
+    with open(os.path.join(path, "train_test_lists.json"), 'r') as f:
+        train_test_list = json.load(f)
+    train_list = train_test_list["train"]
+    test_list = train_test_list["test"]
+    train_cam_infos = [c for idx, c in enumerate(cam_infos) if c.image_name+".JPG" in train_list]
+    test_cam_infos = [c for idx, c in enumerate(cam_infos) if c.image_name+".JPG" in test_list]
+    print("number of train is {}, number of test is {}".format(len(train_cam_infos), len(test_cam_infos)))
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    bin_path = os.path.join(path, "sparse/0/{}.bin".format(points3D))
+    txt_path = os.path.join(path, "sparse/0/{}.txt".format(points3D))
+    if not os.path.exists(ply_path):
+        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+        try:
+            xyz, rgb, _ = read_points3D_binary(bin_path)
+        except:
+            xyz, rgb, _ = read_points3D_text(txt_path)
+        storePly(ply_path, xyz, rgb)
+    try:
+        pcd = fetchPly(ply_path, pointcloud_sample_rate)
+    except:
+        pcd = None
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
     return scene_info
 
 def readCustomMill19CameraInfo(path, pointcloud_sample_rate=1, points3D="points3D"):
@@ -493,7 +542,7 @@ def readNerfSyntheticAndEmptyCameraInfo(path, white_background, eval, pointcloud
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
-    ply_path = os.path.join(path, "sparse/0/{}.ply".format(points3D))
+    ply_path = os.path.join(path, "{}.ply".format(points3D))
     if not os.path.exists(ply_path):
         # Since this data set has no colmap data, we start with random points
         num_pts = 100_000

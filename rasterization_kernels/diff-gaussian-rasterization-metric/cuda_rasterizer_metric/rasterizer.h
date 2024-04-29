@@ -52,9 +52,11 @@ namespace CudaRasterizer_metric
 			float* out_depth,
 			float* out_cnt,
 			double* out_cnt2,
+			double* out_cnt3,
 			float* out_alpha,
 			int* radii = nullptr,
 			double* area_2d = nullptr,
+			double* area_2d_2 = nullptr,
 			bool debug = false);
 
 		static void backward(
