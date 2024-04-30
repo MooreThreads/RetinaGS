@@ -7,6 +7,7 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer.render import render
 from gaussian_renderer.render_metric import render as render_metric
+from utils.general_utils import build_rotation
 import sys
 from scene import SimpleScene, GaussianModel
 from utils.general_utils import safe_state
@@ -113,7 +114,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 loss += opt.lambda_perception * perception_loss_val
                 
             loss.backward()
-
+            
+            if opt.scales_reg_2d:
+                # visibility_filter_2 = visibility_filter
+                visibility_filter_2 = torch.logical_or(gaussians._opacity.grad != 0, torch.abs(gaussians._scaling.grad).sum(dim=-1, keepdim=True) != 0)
+                visibility_filter_2 = visibility_filter_2.squeeze()
+                Rs = build_rotation(gaussians._rotation)[visibility_filter_2]
+                scale = gaussians.get_scaling[visibility_filter_2]
+                L = (1/scale)[...,None]*Rs.permute((0,2,1))
+                w = gaussians.get_opacity[visibility_filter_2]
+                l = gaussians.get_xyz[visibility_filter_2].detach()-viewpoint_cam.camera_center
+                # l /= l.norm(dim=-1,keepdim=True)
+                z_loss = (w/((l.view(-1,1,3)@L).norm(dim=-1)+1e-8)).mean()
+                n = (l/l.norm(dim=-1,keepdim=True))[:,None]@Rs
+                xy_loss = (w*(scale-((n@scale[...,None])*n)[:,0]).norm(dim=1,keepdim=True)/l.norm(dim=-1,keepdim=True)).mean()
+                # print("loss before: ", loss.item())
+                # print("scales_reg: ", scales_reg.item())
+                scales_reg = z_loss+xy_loss
+                scales_reg *= opt.scales_reg_2d_lr * scales_reg
+                scales_reg.backward()
+                
             iter_end.record()
 
             with torch.no_grad():

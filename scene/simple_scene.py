@@ -38,7 +38,7 @@ class SimpleScene:
 
             if os.path.exists(os.path.join(args.source_path, "train_test_lists.json")):
                 print('find train_test_lists.json, assuming ScanNet++ data set!')
-                scene_info = readCustomScanNetCameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)               
+                scene_info = readCustomScanNetCameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D, without_normal=args.without_normal)               
             elif os.path.exists(os.path.join(args.source_path, "test")):
                 print('find test/ folder, assuming Mill_19 data set!')
                 scene_info = readCustomMill19CameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)                
