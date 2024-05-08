@@ -17,6 +17,7 @@ class Scene:
         """
         self.model_path = args.model_path
         self.loaded_iter = None
+        self.scale_control_rate = args.scale_control_rate
         self.gaussians = gaussians
 
         if load_iteration:
@@ -69,7 +70,7 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extentl, self.scale_control_rate)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))

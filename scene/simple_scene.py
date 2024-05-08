@@ -3,7 +3,7 @@ import random
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks, readColmapSceneAndEmptyCameraInfo, readColmapOnlyEmptyCameraInfo, readNerfSyntheticAndEmptyCameraInfo, storePly, fetchPly
-from scene.dataset_readers import readCustomMill19CameraInfo
+from scene.dataset_readers import readCustomMill19CameraInfo, readCustomScanNetCameraInfo
 from scene.dataset_readers import SceneInfo, CameraInfo
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
@@ -16,6 +16,9 @@ class SimpleScene:
         Compared with Scene, a SimpleScene only collects basic training info
         """
         self.model_path = args.model_path
+        self.scale_control_rate = args.scale_control_rate
+        self.pointcloud_sample_rate = args.pointcloud_sample_rate
+        self.opacity_init = args.opacity_init
         self.loaded_iter = None
 
         if load_iteration:
@@ -32,14 +35,20 @@ class SimpleScene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            if not os.path.exists(os.path.join(args.source_path, "test")):
-                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, points3D=args.points3D)
-            else:
+
+            if os.path.exists(os.path.join(args.source_path, "train_test_lists.json")):
+                print('find train_test_lists.json, assuming ScanNet++ data set!')
+                scene_info = readCustomScanNetCameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)               
+            elif os.path.exists(os.path.join(args.source_path, "test")):
                 print('find test/ folder, assuming Mill_19 data set!')
-                scene_info = readCustomMill19CameraInfo(args.source_path, points3D=args.points3D)
+                scene_info = readCustomMill19CameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)                
+            else:
+                scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
+                
+
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval)
+            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -82,9 +91,10 @@ class SimpleScene:
             gaussians.load_ply_own(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
+                                                           "point_cloud.ply"),
+                                   self.cameras_extent)
         else:
-            gaussians.create_from_pcd(self.scene_info.point_cloud, self.cameras_extent)
+            gaussians.create_from_pcd(self.scene_info.point_cloud, self.cameras_extent, self.scale_control_rate, self.opacity_init)
     
     @staticmethod
     def get_batch(cameras):

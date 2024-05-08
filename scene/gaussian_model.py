@@ -121,7 +121,7 @@ class GaussianModel:
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
 
-    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float):
+    def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, scale_control_rate : float, opacity_init : float):
         self.spatial_lr_scale = spatial_lr_scale
         fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
         fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
@@ -133,10 +133,14 @@ class GaussianModel:
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
         scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
+        
+        scales *= scale_control_rate
+        
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
 
-        opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
+        # opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
+        opacities = inverse_sigmoid(opacity_init * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
@@ -165,6 +169,10 @@ class GaussianModel:
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
                                                     max_steps=training_args.position_lr_max_steps)
+        self.scaling_scheduler_args = get_expon_lr_func(lr_init=training_args.scaling_lr_init,
+                                                    lr_final=training_args.scaling_lr_final,
+                                                    lr_delay_mult=training_args.scaling_lr_delay_mult,
+                                                    max_steps=training_args.scaling_lr_max_steps)
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -172,6 +180,17 @@ class GaussianModel:
             if param_group["name"] == "xyz":
                 lr = self.xyz_scheduler_args(iteration)
                 param_group['lr'] = lr
+                return lr
+    
+    def update_learning_rate_scaling(self, iteration):
+        ''' Learning rate scheduling per step '''
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "scaling":
+                lr = self.scaling_scheduler_args(iteration)
+                param_group['lr'] = lr
+                
+                # print('lr_scaling:', str(lr))
+                    
                 return lr
 
     def construct_list_of_attributes(self):
@@ -256,8 +275,10 @@ class GaussianModel:
 
         self.active_sh_degree = self.max_sh_degree
 
-    def load_ply_own(self, path : str):
-            
+    def load_ply_own(self, path : str, spatial_lr_scale : float):
+        
+        self.spatial_lr_scale = spatial_lr_scale
+        
         plydata = PlyData.read(path)
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
@@ -450,6 +471,22 @@ class GaussianModel:
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+    
+    def only_prune_via_screen_space(self, max_screen_size):
+        
+        big_points_vs = self.max_radii2D > max_screen_size # 每步渲染更新最大值
+        prune_mask = big_points_vs
+        
+        print("reset opacity of " + str(torch.sum(prune_mask).item()))
+        
+        opacities_new = self.get_opacity
+        opacities_new[prune_mask] = inverse_sigmoid(torch.min(opacities_new[prune_mask], torch.ones_like(opacities_new[prune_mask])*0.01))
+        optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
+        self._opacity = optimizable_tensors["opacity"]
+        self.max_radii2D[prune_mask] = 0.0
+        
+        torch.cuda.empty_cache()
+        
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
