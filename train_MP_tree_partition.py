@@ -49,7 +49,7 @@ Z_FAR = 1*1000
 EVAL_INTERVAL_EPOCH = 5
 SAVE_INTERVAL_EPOCH = 1
 SAVE_INTERVAL_ITER = 50000
-SKIP_PRUNE_AFTER_RESET = 3000
+SKIP_PRUNE_AFTER_RESET = 0
 SKIP_SPLIT = False
 SKIP_CLONE = False
 PERCEPTION_LOSS = False
@@ -476,6 +476,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     logger.info('start from iteration from {}'.format(iteration))
     
     # set up training args
+    opt.iterations = len(train_dataset) * opt.epochs
     opt.scaling_lr_max_steps = len(train_dataset) * opt.epochs
     logger.info('set scaling_lr_max_steps {}'.format(opt.scaling_lr_max_steps))
     gaussians_group.training_setup(opt)

@@ -56,23 +56,17 @@ On scene garden, eval (161 for train, 24 for test), default hyper-parameters (on
 
 train.py: 
 
-33min25s
-
 [ITER 30000] Evaluating all of test: PSNR 27.28
 
 [ITER 30000] Evaluating all of train: PSNR 30.00
 
 train_with_dataset.py: 
 
-60min51s
-
 [ITER 30000] Evaluating all of test: PSNR 27.26
 
 [ITER 30000] Evaluating all of train: PSNR 29.92
 
 train_MP_tree_partition.py:
-
-双卡，104min08s
 
 [ITER 30107] Evaluating test: PSNR 26.67
 

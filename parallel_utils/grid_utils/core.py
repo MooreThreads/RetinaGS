@@ -258,6 +258,30 @@ def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model
         
     gaussians_group.set_SHdegree(ply_iteration//1000)   
 
+def load_gs_from_single_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model_ids:list, scene:SceneV3, ply_path:str, logger:logging.Logger):
+    for mid in local_model_ids:
+        _gau:BoundedGaussianModel = gaussians_group.get_model(mid)
+        _gau.load_ply(ply_path)
+        # this setup is necassary even optimizer would load lr from .pt
+        # we must set it as GS update some lr with get_expon_lr_func
+        # you can just consider load_ply + set spatial_lr_scale = create_from_pcd
+        _gau.spatial_lr_scale = scene.cameras_extent 
+        logger.info('set _gau.spatial_lr_scale as {}'.format(_gau.spatial_lr_scale))
+
+        # build optimizer
+        _gau.training_setup(opt)
+        # load optimizer state_dict
+        adam_path = os.path.join(os.path.dirname(ply_path), "adam_{}.pt".format(mid))
+        if os.path.exists(adam_path):
+            _gau.optimizer.load_state_dict(torch.load(adam_path))
+            logger.info("load from {}".format(adam_path))
+        else:
+            logger.info('find no adam optimizer')
+
+        _gau.discard_gs_out_range()
+        print('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0]))
+        logger.info('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0])) 
+
 def find_ply_iteration(scene:SceneV3, logger:logging.Logger):
     model_path = scene.model_path
     point_cloud_path = os.path.join(model_path, "point_cloud/iteration_*")

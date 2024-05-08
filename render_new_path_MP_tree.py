@@ -187,16 +187,20 @@ def find_views_on_split_plane(example_views:CameraListDataset, split_dim:int=0, 
         np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]),
     ]
 
-    sample_rate = 6
+    sample_rate = 1
     fake_views = []
+    stand_camera = example_views[0]
+    stand_image_width = stand_camera.image_width
+    stand_image_height = example_views[0].image_height
+
     for i in range(0, len(example_views), sample_rate):
-        # scene.cameras.EmptyCamera的要求R是C2W，T是W2C（R is stored transposed due to 'glm' in CUDA code）
         camera:EmptyCamera = example_views.get_empty_item(i)
         x_axis = np.array([1, 0, 0])
         y_axis = np.array([0, 1, 0])
 
-        for x_offset in [-0.5, 0, 0.5]:
-            for y_angle in [-np.pi/6, 0 , np.pi/6]:
+        # -0.5, 0.2 , 0, 0.2, 0.5
+        for x_offset in [0]:
+            for y_angle in [0]:
                 for x_angle in [0]:
                     fake_camera_center:np.ndarray = camera.camera_center.cpu().numpy()
                     fake_camera_center[split_dim] = split_value + x_offset
@@ -208,16 +212,19 @@ def find_views_on_split_plane(example_views:CameraListDataset, split_dim:int=0, 
                     R_Camera = np.matmul(Rx_Camera, Ry_Camera)
 
                     fake_C2W_R:np.ndarray = np.matmul(camera_x_align_world_axis[split_dim], R_Camera)
-                    fake_W2T_T:np.ndarray = -np.matmul(fake_C2W_R.T, np.reshape(fake_camera_center, (3,1)))
+                    # fake_C2W_R = camera.R
+
+                    fake_W2C_T:np.ndarray = -np.matmul(fake_C2W_R.T, np.reshape(fake_camera_center, (3,1)))
                     # GLOBAL_LOGGER.info('example {} {}'.format(camera.image_width, camera.image_height))
+                    # print((camera.image_width, camera.image_height))
                     fake_views.append(
                         EmptyCamera(
                             colmap_id=0,
                             R=fake_C2W_R,
-                            T=fake_W2T_T.reshape(3),
+                            T=fake_W2C_T.reshape(3),
                             FoVx=camera.FoVx,
                             FoVy=camera.FoVy,
-                            width_height=(camera.image_width, camera.image_height),
+                            width_height=(stand_image_width, stand_image_height),
                             gt_alpha_mask=None,
                             image_name='',
                             uid=0,
@@ -410,7 +417,8 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
 
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
-    assert ply_iteration > 0, 'can not find ply'
+    if len(args.single_ply) <= 0:
+        assert ply_iteration > 0, 'no single complete model, and can not find submodels'
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
         
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
@@ -458,7 +466,12 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         max_size=MAX_SIZE_SINGLE_GS,
     )
     logger.info(gaussians_group.get_info())
-    pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
+    if len(args.single_ply) > 0:
+        logger.info('load pretrained single model')
+        pgc.load_gs_from_single_ply(opt, gaussians_group, local_model_ids, scene, args.single_ply, logger)
+    else:
+        logger.info('load pretrained multiple models')
+        pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
     gaussians_group.set_SHdegree(ply_iteration//1000) 
     del scene.point_cloud
 
@@ -645,6 +658,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--watch_split_plane", action="store_true")
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    parser.add_argument("--single_ply", type=str, default='', help='load all gs from a given .ply file')
 
     args = parser.parse_args(sys.argv[1:])
 
