@@ -153,6 +153,7 @@ def render_sets(dataset : ModelParams, opt, iteration : int, pipeline : Pipeline
     if not skip_test:
         print('test')
         render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, skip_lpips, save_step, save_activated_ply, full_dict, per_view_dict)
+        # render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, skip_lpips, 1, save_activated_ply, full_dict, per_view_dict)
     
     if not skip_train:
         print("train")

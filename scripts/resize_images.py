@@ -3,8 +3,9 @@ from PIL import Image
 from tqdm import tqdm
 
 # 指定源文件夹和目标文件夹
-src_folder = '/root/Nerf/Data/ScanNet_plus_plus/data/train_test_oringal_image/108ec0b806/dslr/original_images'
-dst_folder = '/root/Nerf/Data/ScanNet_plus_plus/data/train_test_oringal_image/108ec0b806/dslr/resized_2_time_images'
+src_folder = '/root/Nerf/Data/mipnerf360/garden/images'
+dst_folder = '/root/Nerf/Data/mipnerf360/garden/resized_3_times/images'
+TIMES = 3
 
 # 确保目标文件夹存在
 os.makedirs(dst_folder, exist_ok=True)
@@ -16,7 +17,7 @@ for idx, filename in enumerate(tqdm(os.listdir(src_folder), desc="resized progre
         img = Image.open(os.path.join(src_folder, filename))
         
         # 计算新的尺寸
-        new_size = (img.width // 2, img.height // 2)
+        new_size = (img.width // TIMES, img.height // TIMES)
 
         # 调整大小
         img_resized = img.resize(new_size)

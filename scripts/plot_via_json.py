@@ -5,7 +5,7 @@ def print_matlab(list):
     print(', '.join(map(str, list)))
 
 # 读取文档
-benchmark_jsons = ['/root/Nerf/Code/HT/Result_Json/scannet_scaling_law.json']
+benchmark_jsons = ['/root/Nerf/Code/HT/Result_Json/garden_scaling_law.json']
 data_folders = []
 for benchmark_json in benchmark_jsons:
     with open(benchmark_json, 'r') as f:
