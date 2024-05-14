@@ -47,7 +47,7 @@ class SceneV3:
                 scene_info = readCustomMill19CameraInfo(args.source_path, points3D=args.points3D)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval)
+            scene_info = readNerfSyntheticAndEmptyCameraInfo(args.source_path, args.white_background, args.eval, points3D=args.points3D)
         else:
             assert False, "Could not recognize scene type!"
 

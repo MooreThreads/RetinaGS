@@ -2,6 +2,7 @@ import os, sys
 import traceback, uuid, logging, time, shutil, glob
 from tqdm import tqdm
 import numpy as np
+import cv2
 
 import torch
 import torch.nn as nn
@@ -35,6 +36,8 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+
 MAX_GS_CHANNEL = 59*3
 SPLIT_ORDERS = [0, 1]
 ENABLE_REPARTITION = False
@@ -54,6 +57,7 @@ SKIP_SPLIT = False
 SKIP_CLONE = False
 PERCEPTION_LOSS = False
 CNN_IMAGE = None
+DATALOADER_FIX_SEED = False
 
 def grid_setup(train_args, logger:logging.Logger):
     args = train_args[0]
@@ -84,7 +88,7 @@ def grid_setup(train_args, logger:logging.Logger):
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=10)
+GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=1)
 
 class CamerawithRelation(Dataset):
     def __init__(self, dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger) -> None:
@@ -99,11 +103,37 @@ class CamerawithRelation(Dataset):
 
     def __len__(self):
         return len(self.dataset)   
+    
+    def load_related_depth(self, image_path):
+        # i know it is awful to code in this way, but it saves my time
+        # 2333
+        depth_folder = '/jfs/shengyi.chen/HT/Data/MatrixCity/bdaibdai___MatrixCity/small_city_depth'
+        normalized_path = os.path.normpath(image_path)
+        parts = normalized_path.split(os.sep)
+        aerial_street, train_test, block_order, filename = parts[-4:]
+        pure_filename = os.path.splitext(filename)[0]
+        depth_name = os.path.join(depth_folder, aerial_street, train_test, block_order + '_depth', pure_filename + '.exr')
+        if os.path.exists(depth_name):
+            depth = cv2.imread(depth_name, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)[...,0]
+            depth = depth / 100 # 量纲 1cm -> 1m
+            return depth
+        else:
+            return None
 
     def __getitem__(self, idx):     
         camera: Camera = self.dataset[idx]
-        max_depth = Z_FAR
+        info = self.dataset.cameras_infos[idx]
+        gt_depth = self.load_related_depth(info.image_path)
+        if gt_depth is not None:
+            gt_depth_max = np.max(gt_depth)
+            masks = (gt_depth == gt_depth_max)
+            gt_depth[masks] = 0
+            estimated_depth = np.max(gt_depth)
+        else:
+            estimated_depth = Z_FAR   
 
+        max_depth = max(min(estimated_depth + 50, Z_FAR), 10) 
+       
         relation_1_N = pgg.get_relation_vector(
             camera, 
             z_near=0.01, 
@@ -138,7 +168,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
     complete_relation = np.zeros((NUM_DATA, NUM_MODEL), dtype=int) - 1
 
     data_loader = DataLoader(CamerawithRelation(train_dataset, path2nodes, sorted_leaf_nodes, logger), 
-                            batch_size=16, num_workers=16, prefetch_factor=16, drop_last=False,
+                            batch_size=16, num_workers=32, prefetch_factor=4, drop_last=False,
                             shuffle=False, collate_fn=SceneV3.get_batch)
     
     idx_start = 0
@@ -377,6 +407,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
+    logger.info('space scale {}'.format(scene.cameras_extent))
 
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
@@ -491,7 +522,8 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
 
     for _i_epoch in range(NUM_EPOCH):
         i_epoch = _i_epoch + start_epoch
-        indices:list = get_sampler_indices_dist(train_dataset=train_dataset, seed=0)
+        seed = 0 if DATALOADER_FIX_SEED else i_epoch
+        indices:list = get_sampler_indices_dist(train_dataset=train_dataset, seed=seed)
         if train_loader is not None:
             del train_loader
 
@@ -700,9 +732,9 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         scheduler.record_info() 
 
         with torch.no_grad():
-            if (i_epoch % SAVE_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):
+            if (i_epoch % SAVE_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):
                 save_GS(iteration=iteration, model_path=scene.model_path, gaussians_group=gaussians_group, path2node=path2bvh_nodes)
-            if (i_epoch % EVAL_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):    
+            if (i_epoch % EVAL_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):    
                 eval(
                     tb_writer, logger, iteration, Ll1_main_rank, loss_main_rank, batch_size,
                     l1_loss, render_func, model_id2rank, local_func_blender,
@@ -834,7 +866,7 @@ def eval(
                     # torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(idx, iteration) + ".png"))
                     # torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))
 
-                    if tb_writer and (idx < 10):
+                    if tb_writer and (idx < 1000) and (idx % 10==0):
                         tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
                         tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
                     l1_test += l1_loss(image, gt_image).mean().item()

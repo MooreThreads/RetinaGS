@@ -608,8 +608,6 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # Progress bar
         if dist.get_rank() == 0:
             progress_bar.update(batch_size)
-            if iteration >= opt.iterations:
-                progress_bar.close()
                 
         step += 1
         torch.cuda.empty_cache()

@@ -20,7 +20,7 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
-from gaussian_renderer.render import render
+from gaussian_renderer.render import render4GaussianModel2
 from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
 from gaussian_renderer.render_metric import render_with_GradNormHelper as render_metric
 import gaussian_renderer.pytorch_gs_render.pytorch_render as pytorch_render
@@ -376,6 +376,7 @@ class GaussianModel2(nn.Module):
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
+        self.clean_cached_features()
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -421,6 +422,7 @@ class GaussianModel2(nn.Module):
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device)
+        self.clean_cached_features()    # discard cached feature 
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -530,7 +532,7 @@ class GaussianModel2(nn.Module):
         return None
 
     def forward(self, viewpoint_cam, pipe, background):
-        return render(viewpoint_cam, self, pipe, background)            
+        return render4GaussianModel2(viewpoint_cam, self, pipe, background)            
 
 def create_batch(patches:list):
     # assume all patch has the same complete shape

@@ -127,6 +127,9 @@ def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:li
 
     train_dataset: CameraListDataset = scene.getTrainCameras() 
     eval_test_dataset: CameraListDataset = scene.getTestCameras()
+
+    # train_dataset = eval_test_dataset
+
     eval_train_list = DatasetRepeater(train_dataset, len(train_dataset)//EVAL_PSNR_INTERVAL, False, EVAL_PSNR_INTERVAL)
     torch.cuda.synchronize()
     if RANK == 0:
@@ -254,6 +257,8 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
+    # scene.save_img_path = os.path.join('/jfs/burning/profiles/dense_scannet/train/rank_{}'.format(RANK))
+    os.makedirs(scene.save_img_path, exist_ok=True)
 
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
@@ -328,10 +333,11 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     logger.info('start from iteration from {}'.format(iteration))
    
     # partOftrain = PartOfDataset(train_dataset, empty=False, start=0, end=None)
+    _step = 20
     partOftrain = DatasetRepeater(
         train_dataset, 
-        repeat_utill=len(train_dataset)//1, 
-        empty=False, step=1)
+        repeat_utill=len(train_dataset)//_step, 
+        empty=False, step=_step)
     train_loader = DataLoader(partOftrain, 
                                 batch_size=1, num_workers=2, prefetch_factor=2, drop_last=False,
                                 shuffle=False, collate_fn=SceneV3.get_batch)
@@ -416,27 +422,27 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
                 task_id, model_id = k
                 ori_camera:Camera = task_id2camera[task_id]
                 idx = ori_camera.uid
-                torchvision.utils.save_image(
-                    local_render_rets[k]['render'], 
-                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
-                    )
-                torchvision.utils.save_image(
-                    local_render_rets[k]['alpha'], 
-                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
-                )
+                # torchvision.utils.save_image(
+                #     local_render_rets[k]['render'], 
+                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
+                #     )
+                # torchvision.utils.save_image(
+                #     local_render_rets[k]['alpha'], 
+                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
+                # )
 
             for k in extra_render_rets:
                 task_id, model_id = k
                 ori_camera:Camera = task_id2camera[task_id]
                 idx = ori_camera.uid
-                torchvision.utils.save_image(
-                    extra_render_rets[k]['render'], 
-                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
-                )
-                torchvision.utils.save_image(
-                    extra_render_rets[k]['alpha'], 
-                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
-                )
+                # torchvision.utils.save_image(
+                #     extra_render_rets[k]['render'], 
+                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
+                # )
+                # torchvision.utils.save_image(
+                #     extra_render_rets[k]['alpha'], 
+                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
+                # )
 
         if (len(images)>0) and RANK==0:
             k = list(images.keys())[0]
@@ -446,7 +452,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
             ori_camera:Camera = task_id2camera[task_id]
             gt_image = ori_camera.original_image.to('cuda')
             torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(ori_camera.uid, iteration) + ".png"))
-            torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))    
+            # torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))    
 
         iter_end.record()
         torch.cuda.synchronize()

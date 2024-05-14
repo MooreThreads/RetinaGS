@@ -27,7 +27,7 @@ python scripts/change_image_id.py \
 colmap exhaustive_matcher \
     --database_path "$DATA_PATH/gt_pose/database.db" \
     --SiftMatching.use_gpu 1 \
-    --SiftMatching.gpu_index 0,1,2,3
+    --SiftMatching.gpu_index 7
 
 mkdir -p $DATA_PATH/sparse/0
 

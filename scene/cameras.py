@@ -14,6 +14,8 @@ from torch import nn
 import numpy as np
 import math
 from utils.graphics_utils import getView2World, getWorld2View2, getProjectionMatrix
+from scipy.spatial.transform import Rotation
+from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 
 
 class Camera(nn.Module):
@@ -95,6 +97,18 @@ class Camera(nn.Module):
         point3d_homo[0, :3] = torch.tensor(point3d, dtype=torch.float32, device=self.data_device)
         point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
         return float(point3d_view[0, 2])
+
+    def update_matrix(self, R:np.ndarray, T:np.ndarray):
+        self.R = R
+        self.T = T
+        trans = self.trans
+        scale = self.scale
+        data_device = self.data_device
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).to(data_device)
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(data_device)
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.projection_matrix_inv = torch.tensor(getView2World(R, T, trans, scale), dtype=torch.float32).transpose(0, 1).to(data_device)
 
 
 class Patch(nn.Module):
@@ -226,6 +240,18 @@ class Patch(nn.Module):
         patch = patch_padding[:, v_start_in_tile:(v_start_in_tile + self.image_height) , u_start_in_tile:(u_start_in_tile + self.image_width)]
         return patch
     
+    def update_matrix(self, R:np.ndarray, T:np.ndarray):
+        self.R = R
+        self.T = T
+        trans = self.trans
+        scale = self.scale
+        data_device = self.data_device
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).to(data_device)
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(data_device)
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.projection_matrix_inv = torch.tensor(getView2World(R, T, trans, scale), dtype=torch.float32).transpose(0, 1).to(data_device)
+
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
@@ -350,6 +376,18 @@ class CamerawithDepth(Camera):
         point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
         return float(point3d_view[0, 2])
 
+    def update_matrix(self, R:np.ndarray, T:np.ndarray):
+        self.R = R
+        self.T = T
+        trans = self.trans
+        scale = self.scale
+        data_device = self.data_device
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).to(data_device)
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(data_device)
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.projection_matrix_inv = torch.tensor(getView2World(R, T, trans, scale), dtype=torch.float32).transpose(0, 1).to(data_device)
+
 
 class EmptyCamera(nn.Module):
     '''
@@ -423,3 +461,72 @@ class EmptyCamera(nn.Module):
         point3d_homo[0, :3] = torch.tensor(point3d, dtype=torch.float32, device=self.data_device)
         point3d_view = torch.matmul(point3d_homo, self.world_view_transform)
         return float(point3d_view[0, 2])    
+    
+    def update_matrix(self, R:np.ndarray, T:np.ndarray):
+        self.R = R
+        self.T = T
+        trans = self.trans
+        scale = self.scale
+        data_device = self.data_device
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).to(data_device)
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).to(data_device)
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.projection_matrix_inv = torch.tensor(getView2World(R, T, trans, scale), dtype=torch.float32).transpose(0, 1).to(data_device)
+
+
+class QandTofCamera(nn.Module):
+    def __init__(self, num_camera:int, training_args) -> None:
+        super().__init__()    
+        # cam_q_w2c is a quaternion(w, x, y, z)
+        self.num_camera = num_camera
+        self.cam_q_w2c = nn.Parameter(torch.zeros((num_camera, 4), dtype=torch.float, device='cuda'), requires_grad=True)
+        self.cam_t_w2c = nn.Parameter(torch.zeros((num_camera, 3), dtype=torch.float, device='cuda'), requires_grad=True)
+
+        l = [
+            {'params': [self.cam_q_w2c], 'lr': training_args.camera_q_lr_init, "name": "cam_q_w2c"},
+            {'params': [self.cam_t_w2c], 'lr': training_args.camera_t_lr_init, "name": "cam_t_w2c"},
+        ]
+        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.q_scheduler_args = get_expon_lr_func(lr_init=training_args.camera_q_lr_init,
+                                                    lr_final=training_args.camera_q_lr_final,
+                                                    lr_delay_mult=training_args.camera_q_lr_delay_mult,
+                                                    max_steps=training_args.camera_q_lr_max_steps)
+        self.t_scheduler_args = get_expon_lr_func(lr_init=training_args.camera_t_lr_init,
+                                                    lr_final=training_args.camera_t_lr_final,
+                                                    lr_delay_mult=training_args.camera_t_lr_delay_mult,
+                                                    max_steps=training_args.camera_t_lr_max_steps)
+
+    def update_learning_rate(self, iteration):
+        ret = -1.0
+        ''' Learning rate scheduling per step '''
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "cam_q_w2c":
+                lr = self.q_scheduler_args(iteration)
+                param_group['lr'] = lr
+                ret = lr # return lr
+                break
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "cam_t_w2c":
+                lr = self.t_scheduler_args(iteration)
+                param_group['lr'] = lr    
+                ret = lr # return lr
+                break      
+
+        return ret   
+
+    def apply_on_camera(self, idx:int, camera:Camera, weight=1.0):
+        r_w2c_original:np.ndarray = camera.R.T # camera.R is c2w rotation
+        q_original_w_last = Rotation.from_matrix(r_w2c_original).as_quat()
+        q_original_gpu = torch.tensor(q_original_w_last[[-1, 0, 1, 2]], dtype=torch.float, device='cuda', requires_grad=False)
+        t_original_gpu = torch.tensor(camera.T, dtype=torch.float, device='cuda', requires_grad=False)
+
+        q_w2c_gpu = q_original_gpu + self.cam_q_w2c[idx] * weight
+        t_w2c_gpu = t_original_gpu + self.cam_t_w2c[idx] * weight
+
+        q_w2c_new_w_last = q_w2c_gpu.cpu().detach().numpy()[[1, 2, 3, 0]]
+        r_w2c_new = Rotation.from_quat(q_w2c_new_w_last).as_matrix()
+        r_c2w_new = r_w2c_new.T
+        t_w2c_new = t_w2c_gpu.cpu().detach().numpy()
+        camera.update_matrix(R=r_c2w_new, T=t_w2c_new)
+        return q_w2c_gpu, t_w2c_gpu, camera

@@ -150,17 +150,17 @@ def fetchPly(path, pointcloud_sample_rate=1):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    # normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
     if pointcloud_sample_rate != 1:
         num_samples = int(positions.shape[0]/pointcloud_sample_rate)
         sampled_indices = np.random.choice(positions.shape[0], num_samples, replace=False)
         positions = positions[sampled_indices]
         colors = colors[sampled_indices]
-        # normals = normals[sampled_indices]
+        normals = normals[sampled_indices]
         print("Random Sample Done!")
         print(positions.shape)
         
-    return BasicPointCloud(points=positions, colors=colors, normals=None)
+    return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
     # Define the dtype for the structured array
