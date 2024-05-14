@@ -27,11 +27,11 @@ def render_wrapper(viewpoint_cam, gaussians, pipe, background):
     viewpoint_cam.to_device('cuda')
     return render(viewpoint_cam, gaussians, pipe, background)    
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, use_checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
-    scene = SimpleScene(dataset, load_iteration=-1)
+    scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()    
     opt.position_lr_max_steps = opt.epochs * len(train_dataset) # Auto update max steps
@@ -43,9 +43,15 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         print('lpips:{}.{}'.format(opt.perception_net_type, opt.perception_net_version))
     else:
         CNN_IMAGE = None
-    if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        gaussians.restore(model_params, opt)
+    if use_checkpoint:
+        # (model_params, first_iter) = torch.load(checkpoint)
+        pth_path  = scene.model_path + "/chkpnt/" + str(scene.loaded_iter) + ".pth"
+        if os.path.exists(pth_path):
+            print("use ckpt at ", pth_path)
+            (model_params, first_iter) = torch.load(pth_path)
+            gaussians.restore(model_params, opt)
+        else:
+            print("can not find ckpt at ", pth_path, ", train from scratch")
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -174,7 +180,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if (iteration in checkpoint_iterations):
                     print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                    torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+                    torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt/" + str(iteration) + ".pth")
 
             iteration += 1
 
@@ -187,6 +193,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     print("\n[EPOCH {}] Saving Gaussians".format(epoch))    
                     scene.save(iteration, gaussians=gaussians)
             elif epoch % opt.save_epoch_interval == 0:
+                print("\n[EPOCH {}] Saving Checkpoint".format(epoch))
+                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
                 print("\n[EPOCH {}] Saving Gaussians".format(epoch))    
                 scene.save(iteration, gaussians=gaussians)
 
@@ -284,6 +292,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--use_checkpoint", action="store_true")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -294,7 +303,7 @@ if __name__ == "__main__":
 
     # Start GUI server, configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.use_checkpoint, args.debug_from)
 
     # All done
     print("\nTraining complete.")
