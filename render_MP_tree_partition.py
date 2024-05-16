@@ -257,7 +257,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
-    # scene.save_img_path = os.path.join('/jfs/burning/profiles/dense_scannet/train/rank_{}'.format(RANK))
+    scene.save_img_path = os.path.join('/jfs/burning/profiles/matrix_city/train/rank_{}'.format(RANK))
     os.makedirs(scene.save_img_path, exist_ok=True)
 
     # find newest ply

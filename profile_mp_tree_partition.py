@@ -184,23 +184,8 @@ def update_relation_matrix_dist(scene:SceneV3, path2nodes:dict, sorted_leaf_node
 
 def get_sampler_indices_dist(train_dataset:CameraListDataset, seed:int):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
-
     N = len(train_dataset)
-    positions = np.zeros((N, 3), dtype=float)
-    for i in range(N):
-        positions[i, :] = train_dataset.get_empty_item(i).camera_center
-
-    if RANK == 0:
-        # seed = np.random.randint(1000)
-        g = torch.Generator()
-        g.manual_seed(seed)
-        indices_gpu = torch.randperm(len(train_dataset), generator=g, dtype=torch.int).to('cuda')
-    else:
-        g = torch.Generator()
-        g.manual_seed(seed)
-        indices_gpu = torch.randperm(len(train_dataset), generator=g, dtype=torch.int).to('cuda')
-
-    dist.broadcast(indices_gpu, src=0, group=None, async_op=False)
+    indices_gpu = torch.tensor(range(N), dtype=torch.int, device='cuda')
     return indices_gpu.tolist()
 
 def get_grouped_indices_dist(model2rank:dict, relation_matrix:torch.Tensor, shuffled_indices:np.ndarray, max_task:int, max_batch:int):
@@ -517,6 +502,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     gaussians_group.set_SHdegree(3)
     current_time = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()) 
 
+    logger.info('afetr build model memory_allocted {}'.format(torch.cuda.memory_allocated()/(1024**2)))
     # load some data to gpu 
     train_data_list = []
     for _i, ids_data in enumerate(train_loader):
@@ -524,7 +510,11 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             ids, data = ids_data[0]
             data_gpu = [_cmr.to_device('cuda') for _cmr in data]
             train_data_list.append(data_gpu)
+    # pop last one manually for garden        
+    train_data_list.pop(-1)        
     progress_bar = tqdm(range(first_iter, NUM_EPOCH*len(train_dataset)), desc="Training progress") if RANK == 0 else None         
+
+    logger.info('after load data memory_allocted: {}'.format(torch.cuda.memory_allocated()/(1024**2)))
 
     dist.barrier()   
     torch.cuda.synchronize(); 
@@ -654,6 +644,8 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     scheduler.record_info() 
     if RANK == 0:
         progress_bar.close()
+
+    logger.info('after training peak_memory_allocted: {}'.format(torch.cuda.max_memory_allocated()/(1024**2)))    
     table_cuda = p.key_averages().table(sort_by="cuda_time_total", row_limit=-1, max_src_column_width=200)   
     table_cpu = p.key_averages().table(sort_by="cpu_time_total", row_limit=-1, max_src_column_width=200) 
     # p.export_chrome_trace(os.path.join(

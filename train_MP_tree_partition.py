@@ -58,6 +58,7 @@ SKIP_CLONE = False
 PERCEPTION_LOSS = False
 CNN_IMAGE = None
 DATALOADER_FIX_SEED = False
+GLOBAL_CKPT_CLEANER:pgc.ckpt_cleaner = None
 
 def grid_setup(train_args, logger:logging.Logger):
     args = train_args[0]
@@ -84,11 +85,10 @@ def grid_setup(train_args, logger:logging.Logger):
             version=opt.perception_net_version
             ).to('cuda')
         logger.info("PERCEPTION_LOSS is {}.{}".format(opt.perception_net_type, opt.perception_net_version))
-    logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE))    
+    logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE))   
+    global GLOBAL_CKPT_CLEANER; GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=args.CKPT_MAX_NUM)
 
 torch.multiprocessing.set_sharing_strategy('file_system')
-
-GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=1)
 
 class CamerawithRelation(Dataset):
     def __init__(self, dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger) -> None:
@@ -264,9 +264,14 @@ def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:li
     eval_train_list = DatasetRepeater(train_dataset, len(train_dataset)//EVAL_PSNR_INTERVAL, False, EVAL_PSNR_INTERVAL)
     torch.cuda.synchronize()
     if RANK == 0:
-        assert len(sorted_leaf_nodes) == NUM_MODEL        
-        trainset_relation_np = get_relation_matrix(train_dataset, path2nodes, sorted_leaf_nodes, logger)
-        trainset_relation_tensor = torch.tensor(trainset_relation_np, dtype=torch.int, device='cuda')
+        assert len(sorted_leaf_nodes) == NUM_MODEL
+        relation_path = os.path.join(scene.model_path, 'trainset_relation.pt')      
+        if os.path.exists(relation_path):
+            trainset_relation_tensor:torch.Tensor = torch.load(relation_path)
+            trainset_relation_tensor = trainset_relation_tensor.cuda()
+        else:    
+            trainset_relation_np = get_relation_matrix(train_dataset, path2nodes, sorted_leaf_nodes, logger)
+            trainset_relation_tensor = torch.tensor(trainset_relation_np, dtype=torch.int, device='cuda')
         evalset_relation_np = get_relation_matrix(eval_test_dataset, path2nodes, sorted_leaf_nodes, logger)
         evalset_relation_tensor = torch.tensor(evalset_relation_np, dtype=torch.int, device='cuda')
     else:
@@ -443,16 +448,25 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     #  create partition of space or load it 
     if ply_iteration <= 0:
         if RANK == 0:
-            path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(scene_3d_grid, BVH_DEPTH, load=None, position=scene.point_cloud.points, logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
-            logger.info(f'get tree\n{tree_str}')
+            if os.path.exists(os.path.join(scene.model_path, "tree_{}.txt".format(RANK))):
+                _space_low, _space_up, _grid_size, _path2node_info_dict = ppu.load_BvhTree_on_3DGrid(os.path.join(scene.model_path, "tree_{}.txt".format(RANK)))
+                path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.load_model_division(scene_3d_grid, _path2node_info_dict, logger=logger)
+                logger.info(f'load tree\n{tree_str}')
+            else:    
+                path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(scene_3d_grid, BVH_DEPTH, load=None, position=scene.point_cloud.points, logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
+                logger.info(f'get tree\n{tree_str}')
+            # path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(scene_3d_grid, BVH_DEPTH, load=None, position=scene.point_cloud.points, logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
+            # logger.info(f'get tree\n{tree_str}')    
+            ppu.save_BvhTree_on_3DGrid(path2bvh_nodes, os.path.join(scene.model_path, "tree_{}.txt".format(RANK)))
             if len(sorted_leaf_nodes) != 2**BVH_DEPTH:
-                logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}') 
+                logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}')             
         else:
             path2bvh_nodes, sorted_leaf_nodes, tree_str = None, None, ''
     else:
         if RANK == 0:
             path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.load_model_division(scene_3d_grid, path2node_info_dict, logger=logger)
-            logger.info(f'get tree\n{tree_str}')
+            logger.info(f'load tree\n{tree_str}')
+            ppu.save_BvhTree_on_3DGrid(path2bvh_nodes, os.path.join(scene.model_path, "tree_{}.txt".format(RANK)))
             if len(sorted_leaf_nodes) != 2**BVH_DEPTH:
                 logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}') 
         else:
@@ -734,12 +748,14 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         with torch.no_grad():
             if (i_epoch % SAVE_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):
                 save_GS(iteration=iteration, model_path=scene.model_path, gaussians_group=gaussians_group, path2node=path2bvh_nodes)
-            if (i_epoch % EVAL_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):    
+            if (i_epoch % EVAL_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):  
+                torch.cuda.empty_cache()  
                 eval(
                     tb_writer, logger, iteration, Ll1_main_rank, loss_main_rank, batch_size,
                     l1_loss, render_func, model_id2rank, local_func_blender,
                     iter_time, testing_iterations, validation_configs, 
                     scene, gaussians_group, scheduler)
+                torch.cuda.empty_cache()
             
             if ENABLE_REPARTITION and (i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH):
                 t0 = time.time()
@@ -912,6 +928,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    parser.add_argument("--CKPT_MAX_NUM", type=int, default=5)
     # grid parameters
     parser.add_argument("--ENABLE_REPARTITION", action='store_true', default=False)
     parser.add_argument("--REPARTITION_START_EPOCH", type=int, default=10)
