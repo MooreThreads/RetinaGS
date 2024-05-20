@@ -16,7 +16,7 @@ from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
-from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch
+from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch, build_rotation
 from utils.workload_utils import NaiveWorkloadBalancer
 
 import parallel_utils.schedulers.dynamic_space as psd 
@@ -404,6 +404,45 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
 
     return loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss
 
+
+def gather_reg_loss(local_render_rets:dict, task_id2camera:dict, local_model:BoundedGaussianModelGroup, opt, pipe, logger: logging.Logger):
+    t0 = time.time() 
+    if not opt.scales_reg_2d:
+        return None
+    if len(local_render_rets) <= 0:
+        logger.info('no render task, scale reg loss ia unavailable')
+        return None
+    
+    all_scales_reg = 0
+    for t_id_m_id in local_render_rets:
+        task_id, model_id = t_id_m_id
+        gaussians: BoundedGaussianModel = local_model.get_model(model_id)
+        rets: dict = local_render_rets[t_id_m_id]
+        viewpoint_cam:Camera = task_id2camera[task_id]
+
+        visibility_filter_2 = rets['visibility_filter']
+        Rs = build_rotation(gaussians._rotation)[visibility_filter_2]
+        scale = gaussians.get_scaling[visibility_filter_2]
+        L = (1/scale)[...,None]*Rs.permute((0,2,1))
+        w = gaussians.get_opacity[visibility_filter_2]
+        l = gaussians.get_xyz[visibility_filter_2].detach()-viewpoint_cam.camera_center
+        # l /= l.norm(dim=-1,keepdim=True)
+        z_loss = (w/((l.view(-1,1,3)@L).norm(dim=-1)+1e-8)).mean()
+        n = (l/l.norm(dim=-1,keepdim=True))[:,None]@Rs
+        xy_loss = (w*(scale-((n@scale[...,None])*n)[:,0]).norm(dim=1,keepdim=True)/l.norm(dim=-1,keepdim=True)).mean()
+        # print("loss before: ", loss.item())
+        # print("scales_reg: ", scales_reg.item())
+        scales_reg = z_loss+xy_loss
+        scales_reg *= opt.scales_reg_2d_lr * scales_reg
+        # scales_reg.backward()
+        if torch.any(torch.isnan()):
+            logger.warning("find nan scales_reg loss in task: {} model: {}".format(task_id, model_id))
+            return None
+        all_scales_reg += scales_reg
+
+    return all_scales_reg
+   
+
 def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, checkpoint_iterations, debug_from, LOGGERS):
     # training-constant states
     RANK, WORLD_SIZE, MAX_LOAD, MAX_BATCH_SIZE = dist.get_rank(), dist.get_world_size(), pipe.max_load, pipe.max_batch_size
@@ -674,7 +713,14 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             if (len(main_grad) + len(extra_gard)) > 0:
                 torch.autograd.backward(main_local_tensor + send_local_tensor, main_grad + extra_gard) 
             else:
-                logger.warning('iteration {}, find no main grad nor extra grad'.format(iteration))  
+                logger.warning('iteration {}, find no main grad nor extra grad'.format(iteration)) 
+
+            scaling_reg:torch.Tensor = gather_reg_loss(local_render_rets, task_id2camera, gaussians_group, opt, pipe, logger)
+            if scaling_reg is not None:
+                if tb_writer:
+                     tb_writer.add_scalar('train_loss_patches/scaling_reg', scaling_reg.item(), iteration)
+                scaling_reg.backward()
+
             t1 = time.time()
             accum_model_grad += (t1-t0)
             if tb_writer:

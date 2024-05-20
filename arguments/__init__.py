@@ -138,6 +138,9 @@ class OptimizationParams(ParamGroup):
         self.camera_t_lr_delay_mult = 0.01
         self.camera_t_lr_max_steps = 30_000
 
+        self.scales_reg_2d = False
+        self.scales_reg_2d_lr = 0.001
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
