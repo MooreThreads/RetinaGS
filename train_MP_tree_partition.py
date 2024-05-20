@@ -435,7 +435,7 @@ def gather_reg_loss(local_render_rets:dict, task_id2camera:dict, local_model:Bou
         scales_reg = z_loss+xy_loss
         scales_reg *= opt.scales_reg_2d_lr * scales_reg
         # scales_reg.backward()
-        if torch.any(torch.isnan()):
+        if torch.any(torch.isnan(scales_reg)):
             logger.warning("find nan scales_reg loss in task: {} model: {}".format(task_id, model_id))
             return None
         all_scales_reg += scales_reg
