@@ -5,12 +5,29 @@ def print_matlab(list):
     print(', '.join(map(str, list)))
 
 # 读取文档
-benchmark_jsons = ['/root/Nerf/Code/HT/Result_Json/scannet_scaling_law.json']
-data_folders = []
-for benchmark_json in benchmark_jsons:
-    with open(benchmark_json, 'r') as f:
-        data = json.load(f)
-    data_folders.extend(data)
+
+benchmark_jsons = []
+dataset='mipnerf360'
+RESOLUTION=1600
+var_list=['bicycle', 'bonsai', 'counter',  'flowers',  'kitchen',  'stump',  'treehill']
+for var in var_list:
+    benchmark_jsons.append(
+    f"/jfs/shengyi.chen/HT/Predict/{dataset}/{var}/default-PM_r-{RESOLUTION}_dgt-0002_iter-60000/results.json"
+    )
+
+dataset='MatrixCity'
+var_list=[1, 2, 4, 8, 16, 32, 64]
+for pointcloud_sample_rate in var_list:
+    benchmark_jsons.append(
+    f"/jfs/shengyi.chen/HT/Predict/MatrixCity/colmap-dense_None-PM_minimal-xyz_r_1_pointcloud_sample_rate-{pointcloud_sample_rate}_epoch-40_without_sky_ball/results.json"   
+    )
+# benchmark_jsons = ['/root/Nerf/Code/DenseGaussian/Result_Json/garden_PM.json']
+
+# data_folders = []
+# for benchmark_json in benchmark_jsons:
+#     with open(benchmark_json, 'r') as f:
+#         data = json.load(f)
+#     data_folders.extend(data)
 
 # 定义需要值
 num_GS = []
@@ -50,20 +67,20 @@ name_list = [
     "test_AGSR"    
     ]
 # 读取需要值
-for data_folder in data_folders:    
-    target_file = os.path.join(data_folder, "results.json")
+for target_file in benchmark_jsons:    
+    # target_file = os.path.join(data_folder, "results.json")
     with open(target_file, "r") as f:
         json_data = json.load(f)
-        num_GS.append(json_data['train']['GS'])
+        # num_GS.append(json_data['train']['GS'])
         
-        train_PSNR.append(json_data['train']['Mean of PSNR'])
-        train_SSIM.append(json_data['train']['Mean of SSIM'])
-        train_LPIPS.append(json_data['train']['Mean of LPIPS'])
-        train_GSPI.append(json_data['train']['Mean of GSPI'])
-        train_GSPP.append(json_data['train']['Mean of GSPP'])
-        train_MAPP.append(json_data['train']['Mean of MAPP'])
-        train_MAPP_2.append(json_data['train']['Mean of MAPP_2'])
-        train_AGSR.append(json_data['train']['AGSR'])
+        # train_PSNR.append(json_data['train']['Mean of PSNR'])
+        # train_SSIM.append(json_data['train']['Mean of SSIM'])
+        # train_LPIPS.append(json_data['train']['Mean of LPIPS'])
+        # train_GSPI.append(json_data['train']['Mean of GSPI'])
+        # train_GSPP.append(json_data['train']['Mean of GSPP'])
+        # train_MAPP.append(json_data['train']['Mean of MAPP'])
+        # train_MAPP_2.append(json_data['train']['Mean of MAPP_2'])
+        # train_AGSR.append(json_data['train']['AGSR'])
         
         test_PSNR.append(json_data['test']['Mean of PSNR'])
         test_SSIM.append(json_data['test']['Mean of SSIM'])
@@ -73,6 +90,11 @@ for data_folder in data_folders:
         test_MAPP.append(json_data['test']['Mean of MAPP'])
         test_MAPP_2.append(json_data['test']['Mean of MAPP_2'])
         test_AGSR.append(json_data['test']['AGSR'])
+
+
+        print('{}\npsnr{}\nssim{}\nlpips{}\n'.format(
+            target_file, json_data['test']['Mean of PSNR'], json_data['test']['Mean of SSIM'], json_data['test']['Mean of LPIPS']
+        ))
         
 # 格式化
 print(benchmark_jsons)

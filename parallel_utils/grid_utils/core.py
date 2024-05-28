@@ -23,7 +23,10 @@ class ckpt_cleaner():
     def _clean(self):
         if len(self.folder_buffer) > self.max_len:
             trash = self.folder_buffer.pop(0)
-            shutil.rmtree(trash, ignore_errors=True)
+            if os.path.isdir(trash):
+                shutil.rmtree(trash, ignore_errors=True)
+            else:    
+                os.remove(trash)
             print('rm {}'.format(trash))
 
     def add(self, folder):

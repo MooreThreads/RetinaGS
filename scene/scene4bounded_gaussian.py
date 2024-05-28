@@ -3,7 +3,7 @@ import random
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks, readColmapSceneAndEmptyCameraInfo, readColmapOnlyEmptyCameraInfo, readNerfSyntheticAndEmptyCameraInfo, storePly, fetchPly
-from scene.dataset_readers import readCustomMill19CameraInfo
+from scene.dataset_readers import readCustomMill19CameraInfo, readCustomScanNetCameraInfo
 from scene.dataset_readers import SceneInfo, CameraInfo
 from scene.gaussian_nn_module import GaussianModel2, BoundedGaussianModel, BoundedGaussianModelGroup
 from utils.graphics_utils import BasicPointCloud
@@ -38,9 +38,13 @@ class SceneV3:
 
         self.train_cameras = {}
         self.test_cameras = {}
+        
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            if not os.path.exists(os.path.join(args.source_path, "test")):
+            if os.path.exists(os.path.join(args.source_path, "train_test_lists.json")):
+                print('find train_test_lists.json, assuming ScanNet++ data set!')
+                scene_info = readCustomScanNetCameraInfo(args.source_path, pointcloud_sample_rate=args.pointcloud_sample_rate, points3D=args.points3D)  
+            elif not os.path.exists(os.path.join(args.source_path, "test")):
                 scene_info = readColmapSceneAndEmptyCameraInfo(args.source_path, args.images, args.eval, points3D=args.points3D)
             else:
                 print('find test/ folder, assuming Mill_19 data set!')

@@ -11,6 +11,8 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.distributed import init_process_group, destroy_process_group
 import torchvision
+import datetime
+os.environ["NCCL_SOCKET_TIMEOUT"] = "60000"
 
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
@@ -63,7 +65,7 @@ GLOBAL_CKPT_CLEANER:pgc.ckpt_cleaner = None
 def grid_setup(train_args, logger:logging.Logger):
     args = train_args[0]
     opt = train_args[2]
-
+    global TENSORBOARD_FOUND; TENSORBOARD_FOUND = TENSORBOARD_FOUND and args.ENABLE_TENSORBOARD
     global ENABLE_REPARTITION; ENABLE_REPARTITION = args.ENABLE_REPARTITION
     global REPARTITION_START_EPOCH; REPARTITION_START_EPOCH = args.REPARTITION_START_EPOCH
     global REPARTITION_END_EPOCH; REPARTITION_END_EPOCH = args.REPARTITION_END_EPOCH
@@ -302,7 +304,7 @@ def mp_setup(rank, world_size, LOCAL_RANK, MASTER_ADDR, MASTER_PORT):
     os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
     os.environ["MASTER_PORT"] = str(MASTER_PORT)
     
-    init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    init_process_group(backend="nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=6000))
     torch.cuda.set_device(LOCAL_RANK)
 
 def prepare_output_and_logger(args, all_args):    
@@ -323,10 +325,17 @@ def prepare_output_and_logger(args, all_args):
         except:
             pass    
 
+    complete_args = all_args[0]
+    RANK = dist.get_rank()
+    logdir4rank = args.model_path
+    if len(complete_args.logdir) > 0:
+        logdir4rank = os.path.join(complete_args.logdir, 'rank_{}'.format(RANK))
+        os.makedirs(logdir4rank, exist_ok=True)
+        
     # Create Tensorboard writer
     tb_writer = None
     if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
+        tb_writer = SummaryWriter(logdir4rank)
     else:
         print("Tensorboard not available: not logging progress")
 
@@ -335,7 +344,7 @@ def prepare_output_and_logger(args, all_args):
     logging.basicConfig(
         format='%(asctime)s-%(filename)s[line:%(lineno)d]-%(levelname)s: %(message)s',
         filemode='w',
-        filename=os.path.join(args.model_path, 'rank_{}_{}.txt'.format(dist.get_rank(), current_time))
+        filename=os.path.join(logdir4rank, 'rank_{}_{}.txt'.format(RANK, current_time))
     )
     logger = logging.getLogger('rank_{}'.format(dist.get_rank()))
     logger.setLevel(logging.INFO)
@@ -974,8 +983,10 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    parser.add_argument("--logdir", type=str, default='', help='path for log files')
     parser.add_argument("--CKPT_MAX_NUM", type=int, default=5)
     # grid parameters
+    parser.add_argument("--ENABLE_TENSORBOARD", action='store_true', default=False)
     parser.add_argument("--ENABLE_REPARTITION", action='store_true', default=False)
     parser.add_argument("--REPARTITION_START_EPOCH", type=int, default=10)
     parser.add_argument("--REPARTITION_END_EPOCH", type=int, default=300)

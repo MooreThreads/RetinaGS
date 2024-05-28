@@ -27,17 +27,19 @@ import parallel_utils.grid_utils.gaussian_grid as pgg
 import parallel_utils.grid_utils.utils as ppu
 
 from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
-from scene.cameras import Camera, EmptyCamera, ViewMessage
-from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
+from scene.cameras import Camera, EmptyCamera, Patch
+from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems, PatchListDataset
 from scene.scene4bounded_gaussian import SceneV3
 from lpipsPyTorch import LPIPS
 from torch.profiler import profile, record_function, ProfilerActivity
+import gaussian_renderer.pytorch_gs_render.pytorch_render as pytorch_render
 
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = False
 except ImportError:
     TENSORBOARD_FOUND = False
+import math    
 
 MAX_GS_CHANNEL = 59*3
 SPLIT_ORDERS = [0, 1]
@@ -55,6 +57,8 @@ SKIP_SPLIT = False
 SKIP_CLONE = False
 PERCEPTION_LOSS = False
 CNN_IMAGE = None
+IMAGE_GRID_X = 2
+IMAGE_GRID_Y = 2
 
 def grid_setup(train_args, logger:logging.Logger):
     args = train_args[0]
@@ -78,7 +82,9 @@ def grid_setup(train_args, logger:logging.Logger):
             version=opt.perception_net_version
             ).to('cuda')
         logger.info("PERCEPTION_LOSS is {}.{}".format(opt.perception_net_type, opt.perception_net_version))
-    logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE))    
+    logger.info("{}, {}".format(SKIP_SPLIT, SKIP_CLONE)) 
+    global IMAGE_GRID_X; IMAGE_GRID_X = args.IMAGE_GRID_X
+    global IMAGE_GRID_Y; IMAGE_GRID_Y = args.IMAGE_GRID_Y
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -131,19 +137,19 @@ def save_GS(iteration, model_path, gaussians_group:BoundedGaussianModelGroup, pa
     if path2node is not None:
         ppu.save_BvhTree_on_3DGrid(path2node, os.path.join(point_cloud_path, "tree_{}.txt".format(RANK)))
 
-def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger):
+def get_relation_matrix(train_dataset:PatchListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger):
     NUM_DATA, NUM_MODEL = len(train_dataset), len(sorted_leaf_nodes)
     complete_relation = np.zeros((NUM_DATA, NUM_MODEL), dtype=int) - 1
 
     data_loader = DataLoader(CamerawithRelation(train_dataset, path2nodes, sorted_leaf_nodes, logger), 
-                            batch_size=16, num_workers=32, prefetch_factor=2, drop_last=False,
+                            batch_size=16, num_workers=16, prefetch_factor=16, drop_last=False,
                             shuffle=False, collate_fn=SceneV3.get_batch)
     
     idx_start = 0
     for i, batch in tqdm(enumerate(data_loader)):
         for _data in batch:
             _max_depth, _relation_1_N, camera = _data
-            # assert isinstance(camera, (Camera, EmptyCamera))
+            assert isinstance(camera, (Camera, EmptyCamera, Patch))
             assert camera.uid == idx_start
             complete_relation[idx_start, :] = _relation_1_N
             if i%100 == 0:
@@ -182,10 +188,27 @@ def update_relation_matrix_dist(scene:SceneV3, path2nodes:dict, sorted_leaf_node
     torch.cuda.synchronize()
     return trainset_relation_tensor.cpu(), evalset_relation_tensor.cpu()
 
-def get_sampler_indices_dist(train_dataset:CameraListDataset, seed:int):
+def get_sampler_indices_dist(train_dataset:PatchListDataset, seed:int):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
+
     N = len(train_dataset)
-    indices_gpu = torch.tensor(range(N), dtype=torch.int, device='cuda')
+    # positions = np.zeros((N, 3), dtype=float)
+    # for i in range(N):
+    #     positions[i, :] = train_dataset.get_empty_item(i).camera_center
+    
+    # must shuffle the patchs 
+    # otherwise tasks combination is just the same as whole image training
+    if RANK == 0:
+        # seed = np.random.randint(1000)
+        g = torch.Generator()
+        g.manual_seed(seed)
+        indices_gpu = torch.randperm(len(train_dataset), generator=g, dtype=torch.int).to('cuda')
+    else:
+        g = torch.Generator()
+        g.manual_seed(seed)
+        indices_gpu = torch.randperm(len(train_dataset), generator=g, dtype=torch.int).to('cuda')
+
+    dist.broadcast(indices_gpu, src=0, group=None, async_op=False)
     return indices_gpu.tolist()
 
 def get_grouped_indices_dist(model2rank:dict, relation_matrix:torch.Tensor, shuffled_indices:np.ndarray, max_task:int, max_batch:int):
@@ -214,8 +237,12 @@ def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:li
 
     train_camera_dataset: CameraListDataset = scene.getTrainCameras() 
     # 160 garden images
-    train_dataset = DatasetRepeater(train_camera_dataset, 160, empty=False, step=1)
-    eval_test_dataset: CameraListDataset = scene.getTestCameras()
+    train_camera_dataset = DatasetRepeater(train_camera_dataset, 160, empty=False, step=1)
+    train_dataset:PatchListDataset = PatchListDataset(train_camera_dataset, h_division=IMAGE_GRID_Y, w_division=IMAGE_GRID_X)
+
+    eval_test_camera_dataset: CameraListDataset = scene.getTestCameras()
+    eval_test_dataset:PatchListDataset = PatchListDataset(eval_test_camera_dataset, h_division=1, w_division=1)
+
     eval_train_list = DatasetRepeater(train_dataset, len(train_dataset)//EVAL_PSNR_INTERVAL, False, EVAL_PSNR_INTERVAL)
     torch.cuda.synchronize()
     if RANK == 0:
@@ -305,11 +332,10 @@ def training_report(
         tb_writer.add_scalar('cnt/memory', torch.cuda.memory_allocated()/(1024**3), iteration)
         # torch.cuda.empty_cache()
 
-def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
-    view_messages = [ViewMessage(e, id=int(_id)) for e, _id in zip(packages, cameraUid_taskId_mainRank[:,1])]  
+def preprocess_data(cameraUid_taskId_mainRank:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
     task_id2cameraUid, uid2camera, task_id2camera = {}, {}, {}
     for camera in cams_gpu:
-        assert isinstance(camera, Camera)
+        assert isinstance(camera, (Camera, Patch))
         uid2camera[camera.uid] = camera 
     for row in cameraUid_taskId_mainRank:
         uid, tid, mid = int(row[0]), int(row[1]), int(row[2])
@@ -317,7 +343,7 @@ def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, c
         task_id2camera[tid] = uid2camera[uid]
     logger.debug(uid2camera)    
     
-    return view_messages, task_id2cameraUid, uid2camera, task_id2camera
+    return task_id2cameraUid, uid2camera, task_id2camera
 
 def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, opt, pipe, logger: logging.Logger):
     t0 = time.time() 
@@ -353,6 +379,41 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
         logger.debug('taskid_mainRank {}, loss {}, l1 {}'.format(k, loss, Ll1))
 
     return loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss
+
+def create_batch(patches:list):
+    # assume all patch has the same complete shape
+    batch_data, batch_size = {}, len(patches)
+    example_p:Patch = patches[0]
+    H, W = example_p.complete_height, example_p.complete_width
+
+    batch_data['packed_views'] = torch.stack([p.pack_up() for p in patches])
+    max_tile_num = max([len(p.all_tiles) for p in patches]) 
+    batch_data['tile_maps'] = torch.zeros((batch_size, max_tile_num), dtype=torch.int, device='cuda')
+    batch_data['tile_nums'] = []
+    for i in range(batch_size):
+        p:Patch = patches[i]
+        num_valid_tile = len(p.all_tiles)
+        batch_data['tile_maps'][i, :num_valid_tile] = p.all_tiles
+        batch_data['tile_nums'].append(num_valid_tile)
+    batch_data['tile_maps_sizes'] = torch.tensor([math.ceil(W/16), math.ceil(H/16)], device='cuda').view(-1, 2).repeat(batch_size, 1)    
+    batch_data['tile_maps_sizes_list'] = [math.ceil(W/16), math.ceil(H/16)]
+    batch_data['image_size_list'] = [math.ceil(W), math.ceil(H)]
+    batch_data['patches_cpu'] = patches  # it's okay to use patch on gpu 
+    return batch_data
+
+def build_render_for_batch(gaussians_group:BoundedGaussianModelGroup, pipe, logger:logging.Logger):
+    def func_render(model_id, render_tasks):
+        model:BoundedGaussianModel = gaussians_group.get_model(model_id)
+        if model is None:
+            logger.error(f"rank {dist.get_rank()} tries to render task with model {model_id}, but get None model!")
+            raise RuntimeError("model missing")
+        if len(render_tasks) <= 0:
+            return {}
+        # generate batched data
+        all_patches = [t.task for t in render_tasks ]
+        batch_data = create_batch(all_patches)
+        return pytorch_render.render(model, batch_data=batch_data)
+    return func_render
 
 def find_latest_ply(model_path, logger):
     point_cloud_path = os.path.join(model_path, "point_cloud/iteration_*")
@@ -409,7 +470,6 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     plydata = PlyData.read(point_cloud_path)
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
     logger.info(f"grid parameters: {SPACE_RANGE_LOW}, {SPACE_RANGE_UP}, {VOXEL_SIZE}, {scene_3d_grid.grid_size}")
-        
     pick = [] 
     # training-constant object
     first_iter = 0
@@ -431,11 +491,6 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     )
     local_func_blender = pgg.build_func_blender(final_background=final_background, logger=logger)
 
-    if len(args.pretrain_load_weight) > 0:
-        pre_model_load:torch.Tensor = torch.load(args.pretrain_load_weight).view(-1).cpu().numpy()
-    else:
-        pre_model_load = None
-    logger.info('load from {} is {}'.format(args.pretrain_load_weight, pre_model_load))
     # create partition of space on pre-trained model
     if RANK == 0:
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
@@ -444,23 +499,15 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         logger.info('shape of xyz used in partition of space {}'.format(xyz.shape))
 
         if args.DIVIDE_SPACE:
-            # divide space by volume will get a tree with grid shape
+        # divide space by volume will get a tree with grid shape
             logger.info(f'spalit space ')
             path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(
                 scene_3d_grid, BVH_DEPTH, load=None, position=None,
                 logger=logger, SPLIT_ORDERS=SPLIT_ORDERS, 
                 pre_load_grid=np.ones_like(scene_3d_grid.load_cnt))
         else:
-            logger.info('divide by load')
-            if pre_model_load is not None:
-                logger.info('find pre_model_load')
-                gs_load = np.ones((xyz.shape[0], ), dtype=float)
-                _load = 0.9*gs_load + 0.1*pre_model_load * (xyz.shape[0]/pre_model_load.sum())
-                logger.info('pre_model_load weight: {}'.format(pre_model_load.sum()/xyz.shape[0]))
-            else:
-                _load = None
             path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(
-                scene_3d_grid, BVH_DEPTH, load=_load, 
+                scene_3d_grid, BVH_DEPTH, load=None, 
                 position=xyz,
                 logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
         logger.info(f'get tree\n{tree_str}')
@@ -487,7 +534,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     del scene.point_cloud, plydata
 
     logger.info('models are initialized:' + gaussians_group.get_info())
-    render_func = pgc.build_func_render(gaussians_group, pipe, background, logger, need_buffer=False)
+    render_func = build_render_for_batch(gaussians_group, pipe, logger)
 
     # prepare dataset after the division of model/space, as the blender_order is affected by division
     # train_rlt, evalset_rlt need to be updated after every division of model/space
@@ -587,19 +634,18 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
 
                 with record_function('custom_forward'):
                     cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
-                    view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
-                
+                    task_id2cameraUid, uid2camera, task_id2camera = preprocess_data(cameraUid_taskId_mainRank, data_gpu, logger)
                     # logger.info(task_id2camera)
-                    mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
+                    mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in data_gpu])
                     _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
                     logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
 
-                    local_render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks = scheduler.render_pass(
+                    local_render_rets, send_tasks, recv_tasks, render_tasks, main_rank_tasks = scheduler.render_batch_pass(
                         func_render=render_func,
                         modelId2rank=model_id2rank,
                         _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
                         _relation_matrix=train_rlt[_uids, :],
-                        views=view_messages)
+                        views=data_gpu)
                     torch.cuda.synchronize(); 
 
                 with record_function('custom_sr_forward'):
@@ -681,8 +727,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     with open(os.path.join(
         dataset_args.model_path, 'profile_cuda_{}.txt'.format(current_time)
     ), 'w') as f:
-        f.writelines(table_cuda) 
-        print(type(table_cuda)) 
+        f.writelines(table_cuda)  
     pick += ['cuda\n']
     lines = table_cuda.split('\n')
     pick += [lines[i]+'\n' for i in range(3)]
@@ -696,7 +741,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     lines = table_cpu.split('\n')  
     pick += [lines[i]+'\n' for i in range(3)]
     pick += [line+'\n' for line in lines if 'custom' in line]
-
+    
     with open(os.path.join(
         dataset_args.model_path, 'pick_{}.txt'.format(current_time)
     ), 'w') as f:
@@ -754,7 +799,9 @@ if __name__ == "__main__":
     parser.add_argument("--PERCEPTION_LOSS", action='store_true', default=False)
     parser.add_argument("--name", type=str, default = '')
     parser.add_argument("--pretain_model_path", type=str)
-    parser.add_argument("--pretrain_load_weight", type=str, default='')
+    # image grid
+    parser.add_argument("--IMAGE_GRID_X", type=int, default=2)
+    parser.add_argument("--IMAGE_GRID_Y", type=int, default=2)
 
     args = parser.parse_args(sys.argv[1:])
 

@@ -172,6 +172,9 @@ class Grid3DSpace:
         accum_on_3Dgrid(grid=self.load_cnt, value=load_np, index=position_int)
         return self.load_cnt
     
+    def accum_load_grid(self, load_np:np.ndarray):
+        self.load_cnt += load_np
+
     def clean_load(self):
         self.load_cnt *= 0
 

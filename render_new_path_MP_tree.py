@@ -411,7 +411,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
-    time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) 
+    time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) if len(args.name) <=0 else args.name
     scene.save_img_path = os.path.join(scene.model_path, 'img_{}'.format(time_str))
     os.makedirs(scene.save_img_path, exist_ok=True)
 
@@ -657,6 +657,7 @@ if __name__ == "__main__":
     parser.add_argument("--watch_split_plane", action="store_true")
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
     parser.add_argument("--single_ply", type=str, default='', help='load all gs from a given .ply file')
+    parser.add_argument("--name", type=str, default='')
 
     args = parser.parse_args(sys.argv[1:])
 

@@ -214,7 +214,7 @@ def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:li
 
     train_camera_dataset: CameraListDataset = scene.getTrainCameras() 
     # 160 garden images
-    train_dataset = DatasetRepeater(train_camera_dataset, 160, empty=False, step=1)
+    train_dataset = train_camera_dataset
     eval_test_dataset: CameraListDataset = scene.getTestCameras()
     eval_train_list = DatasetRepeater(train_dataset, len(train_dataset)//EVAL_PSNR_INTERVAL, False, EVAL_PSNR_INTERVAL)
     torch.cuda.synchronize()
@@ -403,13 +403,18 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = pgg.init_grid_dist(scene=scene, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
     path2node_info_dict = None
     # load the pre-trained ply
-    _model_path:str = args.pretain_model_path
-    ply_iteration = find_latest_ply(model_path=args.pretain_model_path, logger=logger) 
-    point_cloud_path = os.path.join(_model_path, "point_cloud/iteration_{}/point_cloud.ply".format(ply_iteration))
-    plydata = PlyData.read(point_cloud_path)
+    # _model_path:str = args.pretain_model_path
+    # ply_iteration = find_latest_ply(model_path=args.pretain_model_path, logger=logger) 
+    # point_cloud_path = os.path.join(_model_path, "point_cloud/iteration_{}/point_cloud.ply".format(ply_iteration))
+    # plydata = PlyData.read(point_cloud_path)
+    # scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
+    # logger.info(f"grid parameters: {SPACE_RANGE_LOW}, {SPACE_RANGE_UP}, {VOXEL_SIZE}, {scene_3d_grid.grid_size}")
+    ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration    
+    SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
+        
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
     logger.info(f"grid parameters: {SPACE_RANGE_LOW}, {SPACE_RANGE_UP}, {VOXEL_SIZE}, {scene_3d_grid.grid_size}")
-        
+
     pick = [] 
     # training-constant object
     first_iter = 0
@@ -431,38 +436,9 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     )
     local_func_blender = pgg.build_func_blender(final_background=final_background, logger=logger)
 
-    if len(args.pretrain_load_weight) > 0:
-        pre_model_load:torch.Tensor = torch.load(args.pretrain_load_weight).view(-1).cpu().numpy()
-    else:
-        pre_model_load = None
-    logger.info('load from {} is {}'.format(args.pretrain_load_weight, pre_model_load))
-    # create partition of space on pre-trained model
+        # load partition of space 
     if RANK == 0:
-        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
-                np.asarray(plydata.elements[0]["y"]),
-                np.asarray(plydata.elements[0]["z"])), axis=1)
-        logger.info('shape of xyz used in partition of space {}'.format(xyz.shape))
-
-        if args.DIVIDE_SPACE:
-            # divide space by volume will get a tree with grid shape
-            logger.info(f'spalit space ')
-            path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(
-                scene_3d_grid, BVH_DEPTH, load=None, position=None,
-                logger=logger, SPLIT_ORDERS=SPLIT_ORDERS, 
-                pre_load_grid=np.ones_like(scene_3d_grid.load_cnt))
-        else:
-            logger.info('divide by load')
-            if pre_model_load is not None:
-                logger.info('find pre_model_load')
-                gs_load = np.ones((xyz.shape[0], ), dtype=float)
-                _load = 0.9*gs_load + 0.1*pre_model_load * (xyz.shape[0]/pre_model_load.sum())
-                logger.info('pre_model_load weight: {}'.format(pre_model_load.sum()/xyz.shape[0]))
-            else:
-                _load = None
-            path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.divide_model_by_load(
-                scene_3d_grid, BVH_DEPTH, load=_load, 
-                position=xyz,
-                logger=logger, SPLIT_ORDERS=SPLIT_ORDERS)
+        path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.load_model_division(scene_3d_grid, path2node_info_dict, logger=logger)
         logger.info(f'get tree\n{tree_str}')
         if len(sorted_leaf_nodes) != 2**BVH_DEPTH:
             logger.warning(f'bad division! expect {2**BVH_DEPTH} leaf-nodes but get {len(sorted_leaf_nodes)}') 
@@ -483,8 +459,9 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     )
     logger.info(gaussians_group.get_info())
 
-    load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, plydata, logger)
-    del scene.point_cloud, plydata
+    pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
+    gaussians_group.set_SHdegree(ply_iteration//1000) 
+    del scene.point_cloud
 
     logger.info('models are initialized:' + gaussians_group.get_info())
     render_func = pgc.build_func_render(gaussians_group, pipe, background, logger, need_buffer=False)
@@ -528,12 +505,13 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     logger.info(tmp_str)
     pick.append(tmp_str + '\n')
     # load some data to gpu 
-    train_data_list = []
-    for _i, ids_data in enumerate(train_loader):
-        if True:
-            ids, data = ids_data[0]
-            data_gpu = [_cmr.to_device('cuda') for _cmr in data]
-            train_data_list.append(data_gpu)
+    train_data_list = train_loader
+    # train_data_list = []
+    # for _i, ids_data in enumerate(train_loader):
+    #     if True:
+    #         ids, data = ids_data[0]
+    #         data_gpu = [_cmr.to_device('cuda') for _cmr in data]
+    #         train_data_list.append(data_gpu)
       
     progress_bar = tqdm(range(first_iter, NUM_EPOCH*len(train_dataset)), desc="Training progress") if RANK == 0 else None         
 
@@ -557,8 +535,11 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             i_epoch = _i_epoch + start_epoch
             gaussians_group.update_learning_rate(iteration)  #  - ply_iteration
 
-            for data_gpu in train_data_list:
+            for ids_data in train_data_list:
                 with record_function("custom_control_info"):
+                    ids, data_cpu = ids_data[0]
+
+                    data_gpu = [_cmr.to_device('cuda') for _cmr in data_cpu]
                     batch_size = len(data_gpu)  # list of Camera/None, batchsize can be dynamic in the future    
                     assert batch_size > 0, "get empty group"             
                     iter_start.record()
@@ -770,7 +751,7 @@ if __name__ == "__main__":
 
     time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) 
     tag = time_str if len(args.name) <= 0 else args.name
-    args.model_path = os.path.join(args.model_path, tag, 'rank_{}_of_{}'.format(RANK, WORLD_SIZE))
+    args.model_path = os.path.join(args.model_path, 'rank_{}'.format(RANK, WORLD_SIZE))
     torch.multiprocessing.set_start_method('spawn')
     print("Optimizing " + args.model_path)
 

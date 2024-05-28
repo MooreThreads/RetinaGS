@@ -68,13 +68,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     logger.info(tmp_str)
     pick.append(tmp_str + '\n')
 
-    train_data_list = []
-    for _i, ids_data in enumerate(train_loader):
-        if True:
-            data = ids_data
-            data_gpu = [_cmr.to_device('cuda') for _cmr in data]
-            train_data_list.append(data_gpu)
-    train_data_list.pop(-1)
+    train_data_list = train_loader
+    # for _i, ids_data in enumerate(train_loader):
+    #     if True:
+    #         data = ids_data
+    #         data_gpu = [_cmr.to_device('cuda') for _cmr in data]
+    #         train_data_list.append(data_gpu)
+    # train_data_list.pop(-1)
 
     pick = []
     tmp_str = 'afetr load data memory_allocted {}'.format(torch.cuda.memory_allocated()/(1024**2))
