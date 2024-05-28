@@ -1,0 +1,1 @@
+bash: /root/Nerf/Code/DenseGaussian/farm/tasks/train_mipnerf_bonsai_r-1k6.sh: No such file or directory

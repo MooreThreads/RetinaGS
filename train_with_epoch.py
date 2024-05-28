@@ -22,51 +22,66 @@ try:
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
+import parallel_utils.grid_utils.core as pgc
 
 def render_wrapper(viewpoint_cam, gaussians, pipe, background):
     viewpoint_cam.to_device('cuda')
     return render(viewpoint_cam, gaussians, pipe, background)    
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, use_checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, use_checkpoint, debug_from, args):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()    
-    opt.position_lr_max_steps = opt.epochs * len(train_dataset) # Auto update max steps
-    opt.scaling_lr_max_steps = opt.position_lr_max_steps
     gaussians.training_setup(opt)
+    checkpoint_path = os.path.join(scene.model_path, "chkpnt")
+    GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=args.CKPT_MAX_NUM)
+    
     if opt.perception_loss:
         CNN_IMAGE = LPIPS(net_type=opt.perception_net_type, 
                     version=opt.perception_net_version).to('cuda')
         print('lpips:{}.{}'.format(opt.perception_net_type, opt.perception_net_version))
     else:
         CNN_IMAGE = None
+        
+    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    iter_start = torch.cuda.Event(enable_timing = True)
+    iter_end = torch.cuda.Event(enable_timing = True)
+    ema_loss_for_log = 0.0   
+        
+    # checkpoint function
+    if not os.path.exists(checkpoint_path):
+        os.makedirs(checkpoint_path, exist_ok=True)
+    # find max checkpoint iter    
     if use_checkpoint:
-        # (model_params, first_iter) = torch.load(checkpoint)
-        pth_path  = scene.model_path + "/chkpnt/" + str(scene.loaded_iter) + ".pth"
-        if os.path.exists(pth_path):
+        chkpnt_list = os.listdir(checkpoint_path)
+        if len(chkpnt_list) != 0:
+            max_iter = max([int(fname.split(".")[0]) for fname in chkpnt_list])
+            pth_path  = scene.model_path + "/chkpnt/" + str(max_iter) + ".pth"                        
             print("use ckpt at ", pth_path)
             (model_params, first_iter) = torch.load(pth_path)
             gaussians.restore(model_params, opt)
         else:
-            print("can not find ckpt at ", pth_path, ", train from scratch")
-
-    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
-    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-
-    iter_start = torch.cuda.Event(enable_timing = True)
-    iter_end = torch.cuda.Event(enable_timing = True)
-
-    ema_loss_for_log = 0.0
+            print("can not find ckpt, train from scratch")            
+            
+    # set with iterations
+    if opt.epochs == -1:
+        max_epoch = (opt.iterations + len(train_dataset) - 1) // len(train_dataset)
+    else:
+        max_epoch = int(opt.epochs)
+    opt.position_lr_max_steps = max_epoch * len(train_dataset) # Auto update max steps
+    opt.scaling_lr_max_steps = opt.position_lr_max_steps
     progress_bar = tqdm(range(first_iter, opt.position_lr_max_steps), desc="Training progress")
     first_iter += 1 # origin code add 1 to avoid corner cases on iteration 0, we just follow it
     iteration = first_iter
+    print('start from iteration', str(iteration))
+    epoch = iteration // len(train_dataset)
+    print('start from epoch', str(epoch))   
     
-    epoch = 0  
-    
-    while epoch < int(opt.epochs): # for i_epoch in range(NUM_EPOCH):
+    while epoch < max_epoch: # for i_epoch in range(NUM_EPOCH):
         
         epoch += 1 
         train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene.get_batch)
@@ -150,7 +165,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     progress_bar.update(10)
 
                 # Log and save
-                if iteration % 100000 == 0:
+                if iteration % 1000 == 0:
                     training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))
 
                 # Densification
@@ -181,22 +196,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if (iteration in checkpoint_iterations):
                     print("\n[ITER {}] Saving Checkpoint".format(iteration))
                     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt/" + str(iteration) + ".pth")
-
+                    GLOBAL_CKPT_CLEANER.add(scene.model_path + "/chkpnt/" + str(iteration) + ".pth")
             iteration += 1
 
         with torch.no_grad():
             if epoch % opt.eval_epoch_interval == 0:            
                 training_report_epoch(tb_writer, opt, epoch, Ll1, loss, l1_loss, CNN_IMAGE, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))            
-                
-            if opt.save_epoch_interval == -1 :
-                if epoch == opt.epochs:                
-                    print("\n[EPOCH {}] Saving Gaussians".format(epoch))    
-                    scene.save(iteration, gaussians=gaussians)
-            elif epoch % opt.save_epoch_interval == 0:
-                print("\n[EPOCH {}] Saving Checkpoint".format(epoch))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+            
+            # last epoch save
+            if epoch == max_epoch:                
+                training_report_epoch(tb_writer, opt, epoch, Ll1, loss, l1_loss, CNN_IMAGE, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))
                 print("\n[EPOCH {}] Saving Gaussians".format(epoch))    
-                scene.save(iteration, gaussians=gaussians)
+                scene.save(iteration, gaussians=gaussians)                
+            # save_epoch_interval
+            elif opt.save_epoch_interval != -1 and epoch % opt.save_epoch_interval == 0:
+                print("\n[EPOCH {}] Saving Checkpoint".format(epoch))
+                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt/" + str(iteration) + ".pth")
+                GLOBAL_CKPT_CLEANER.add(scene.model_path + "/chkpnt/" + str(iteration) + ".pth")
 
         
 def prepare_output_and_logger(args):    
@@ -292,7 +308,8 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("--use_checkpoint", action="store_true")
+    parser.add_argument("--not_use_checkpoint", action="store_true")
+    parser.add_argument("--CKPT_MAX_NUM", type=int, default=5)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -303,7 +320,7 @@ if __name__ == "__main__":
 
     # Start GUI server, configure and run training
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.use_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, not args.not_use_checkpoint, args.debug_from, args)
 
     # All done
     print("\nTraining complete.")

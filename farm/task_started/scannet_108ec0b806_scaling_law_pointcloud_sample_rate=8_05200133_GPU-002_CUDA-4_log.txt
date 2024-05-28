@@ -1,0 +1,1 @@
+bash: /root/Nerf/Code/DenseGaussian/farm/tasks/scannet_108ec0b806_scaling_law_pointcloud_sample_rate=8.sh: No such file or directory
