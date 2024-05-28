@@ -5,29 +5,12 @@ def print_matlab(list):
     print(', '.join(map(str, list)))
 
 # 读取文档
-
-benchmark_jsons = []
-dataset='mipnerf360'
-RESOLUTION=1600
-var_list=['bicycle', 'bonsai', 'counter',  'flowers',  'kitchen',  'stump',  'treehill']
-for var in var_list:
-    benchmark_jsons.append(
-    f"/jfs/shengyi.chen/HT/Predict/{dataset}/{var}/default-PM_r-{RESOLUTION}_dgt-0002_iter-60000/results.json"
-    )
-
-dataset='MatrixCity'
-var_list=[1, 2, 4, 8, 16, 32, 64]
-for pointcloud_sample_rate in var_list:
-    benchmark_jsons.append(
-    f"/jfs/shengyi.chen/HT/Predict/MatrixCity/colmap-dense_None-PM_minimal-xyz_r_1_pointcloud_sample_rate-{pointcloud_sample_rate}_epoch-40_without_sky_ball/results.json"   
-    )
-# benchmark_jsons = ['/root/Nerf/Code/DenseGaussian/Result_Json/garden_PM.json']
-
-# data_folders = []
-# for benchmark_json in benchmark_jsons:
-#     with open(benchmark_json, 'r') as f:
-#         data = json.load(f)
-#     data_folders.extend(data)
+benchmark_jsons = ['/root/Nerf/Code/HT/Result_Json/garden_scaling_law.json']
+data_folders = []
+for benchmark_json in benchmark_jsons:
+    with open(benchmark_json, 'r') as f:
+        data = json.load(f)
+    data_folders.extend(data)
 
 # 定义需要值
 num_GS = []

@@ -145,18 +145,19 @@ def readColmapEmptyCameras(cam_extrinsics, cam_intrinsics, images_folder):
     sys.stdout.write('\n')
     return cam_infos
 
-def fetchPly(path, pointcloud_sample_rate=1):
+def fetchPly(path, pointcloud_sample_rate=1, without_normal=False):
     plydata = PlyData.read(path)
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T if not without_normal else None
     if pointcloud_sample_rate != 1:
         num_samples = int(positions.shape[0]/pointcloud_sample_rate)
         sampled_indices = np.random.choice(positions.shape[0], num_samples, replace=False)
         positions = positions[sampled_indices]
         colors = colors[sampled_indices]
-        normals = normals[sampled_indices]
+        if not without_normal:
+            normals = normals[sampled_indices]
         print("Random Sample Done!")
         print(positions.shape)
         
@@ -305,7 +306,7 @@ def readColmapOnlyEmptyCameraInfo(path, images, eval, pointcloud_sample_rate=1, 
                            ply_path=None)
     return scene_info
 
-def readCustomScanNetCameraInfo(path, pointcloud_sample_rate=1, points3D="points3D"):
+def readCustomScanNetCameraInfo(path, pointcloud_sample_rate=1, points3D="points3D", without_normal=False):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -343,7 +344,7 @@ def readCustomScanNetCameraInfo(path, pointcloud_sample_rate=1, points3D="points
             xyz, rgb, _ = read_points3D_text(txt_path)
         storePly(ply_path, xyz, rgb)
     try:
-        pcd = fetchPly(ply_path, pointcloud_sample_rate)
+        pcd = fetchPly(ply_path, pointcloud_sample_rate, without_normal)
     except:
         pcd = None
 

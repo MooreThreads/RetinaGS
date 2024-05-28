@@ -60,6 +60,7 @@ class ModelParams(ParamGroup):
         self.opacity_init = 0.1
         self.pointcloud_sample_rate = 1
         self.points3D = "points3D"
+        self.without_normal = False
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -119,6 +120,8 @@ class OptimizationParams(ParamGroup):
         self.scales_reg_sum_lr = 0.01
         self.scales_reg_square_sum_enable = False
         self.scales_reg_square_sum_lr = 0.01
+        self.scales_reg_2d = False
+        self.scales_reg_2d_lr = 0.01
         self.lr_scales_schedule = False
         self.perception_loss = False
         self.perception_net_type = "vgg"
