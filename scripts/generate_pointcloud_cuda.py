@@ -281,25 +281,26 @@ def sky_ball_addition(ply_path, save_ply_path, sky_ball_rate):
 
 if __name__ == '__main__':
     # # aerial
-    # pose_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/aerial/pose/block_all_unit-1m_val/transforms_test.json'
+    # pose_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/aerial/pose/block_all_unit-1m_val/transforms_train.json'
     # depth_folder = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city_depth'
-    # save_path ='/root/Nerf/Code/MatrixCity-main/ply'
-    # interval = 8
+    # save_path = '/root/Nerf/Code/DenseGaussian/ply'
+    # interval = 3
     # type ='aerial'
     # _, xyzs_aerial, rgbs_aerial = generate_pointcloud_cuda(pose_path, depth_folder, save_path, interval, type, False, unit='1m')
     # xyzs_aerial = xyzs_aerial.detach().cpu().contiguous().clone().numpy()
     # rgbs_aerial = rgbs_aerial.detach().cpu().contiguous().clone().numpy()
-    # storePly(os.path.join(save_path,'aerial_block_A_unit-1m_sub-1_zoom-out-interval_8.ply'), np.concatenate(xyzs_aerial, axis=0), np.concatenate(rgbs_aerial, axis=0))
+    # storePly(os.path.join(save_path,'aerial_block_all_val_only_train_unit-1m_interval_3.ply'), np.concatenate(xyzs_aerial, axis=0), np.concatenate(rgbs_aerial, axis=0))
     
     # downsample('/jfs/shengyi.chen/HT/Code/MatrixCity-main/ply/aerial_block-all_interval-4_2.ply', voxel_size=0.01)
-
     
-    # ply_path = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial_block_A_unit-1m_sub-1_zoom-out-interval_8.ply'
-    # save_ply_path = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial_block_A_unit-1m_sub-1_zoom-out-interval_8_3Mi.ply'
-    # random_sample_pointcloud(ply_path, save_ply_path, 3_000_000)
+    # # ORDER='4'
+    # # print(ORDER + ' quarter')
+    # ply_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/Block_all_unit-1m_choice-100/fused_purning_hand.ply'
+    # save_ply_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/Block_all_unit-1m_choice-100/fused_purning_hand_1M36_1-32.ply'
+    # random_sample_pointcloud(ply_path, save_ply_path, 1_360_000)
     
-    ply_path = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial-3Mi_street-dense-3Mi.ply'
-    save_ply_path = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial-3Mi_street-dense-3Mi_with-skyball-percentage-1.ply'
+    ply_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/block_A_unit-1m_dense_sub-1_val/fused_2k_punrning-hand.ply'
+    save_ply_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/block_A_unit-1m_dense_sub-1_val/fused_2k_punrning-hand_sky-ball-percentage-1.ply'
     sky_ball_addition(ply_path, save_ply_path, 0.01)
     
     # ply_path = '/root/Nerf/Code/MatrixCity-main/ply/street_test/Block_all_unit-1m_choice-100_intelval-1.ply'
@@ -308,10 +309,12 @@ if __name__ == '__main__':
 
 
     # # street
-    # pose_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/Block_all_unit-1m/transforms_dense_all.json'
+    # # ORDER='4'
+    # # print(ORDER + ' quarter')
+    # pose_path = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city/street/pose/Block_all_dense_unit-1m_selected-zone-2_val/transforms_train.json'
     # depth_folder = '/root/Nerf/Data/MatrixCity/bdaibdai___MatrixCity/small_city_depth'
-    # save_path ='/root/Nerf/Code/MatrixCity-main/ply/street_test'
-    # interval = 4
+    # save_path ='/root/Nerf/Code/DenseGaussian/ply'
+    # interval = 5
     # type ='street'
     # depth_masks, xyzs_street, rgbs_street = generate_pointcloud_cuda(pose_path, depth_folder, save_path, interval, type, False, unit='1m')
     # depth_masks = depth_masks.view(-1)
@@ -319,11 +322,14 @@ if __name__ == '__main__':
     # rgbs_street = rgbs_street.view(-1, 3)
     # xyzs_masked = xyzs_street[depth_masks].detach().cpu().contiguous().clone().numpy()
     # rgbs_masked = rgbs_street[depth_masks].detach().cpu().contiguous().clone().numpy()
-    # storePly(os.path.join(save_path,'street_block_A_unit-1m_sub-1-interval_4.ply'), xyzs_masked, rgbs_masked)
+    # storePly(os.path.join(save_path,'street_block_all_selected-zone-2_val_only_train_unit-1m_interval_5.ply'), xyzs_masked, rgbs_masked)
     
     # # 合并
-    # aerial_ply = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/street_block_A_unit-1m_sub-1-interval_4-3Mi.ply'
-    # street_ply = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial_block_A_unit-1m_sub-1_zoom-out-interval_8_3Mi.ply'
+    # # ORDER_1='3'
+    # # ORDER_2='4'
+    # # print("merge ", ORDER_1, ORDER_2)
+    # aerial_ply = '/root/Nerf/Code/DenseGaussian/ply/aerial_block_all_val_only_train_unit-1m_interval_88Mi.ply'
+    # street_ply = '/root/Nerf/Code/DenseGaussian/ply/street_block_all_selected-zone-2_val_only_train_unit-1m_interval_5_218M.ply'
     # aerial_xyzs, aerial_rgbs = fetchPly(aerial_ply)
     # print("Number of aerial pointcloud:", aerial_xyzs.shape[0])        
     # street_xyzs, street_rgbs = fetchPly(street_ply)
@@ -332,7 +338,7 @@ if __name__ == '__main__':
     # xyzs = np.concatenate((aerial_xyzs, street_xyzs), axis=0)
     # rgbs = np.concatenate((aerial_rgbs, street_rgbs), axis=0)
     # print("Number of merge pointcloud:", xyzs.shape[0])        
-    # ply_path = '/root/Nerf/Code/MatrixCity-main/ply/block_A_unit-1m_sub-1/aerial-3Mi_street-dense-3Mi.ply'    
+    # ply_path = '/root/Nerf/Code/DenseGaussian/ply/aerial-block-all-street-dense-selected-zone-2_val_only_train_unit-1m_306M.ply'    
     # storePly(ply_path, xyzs, rgbs)
     # print(ply_path, 'done!')
     
