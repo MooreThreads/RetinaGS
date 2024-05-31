@@ -45,7 +45,8 @@ def get_expon_lr_func(
     """
 
     def helper(step):
-        if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
+        if step < 0 or (lr_init <= 0.0 or lr_final <= 0.0):
+            # either 0 lr_init or 0 lr_final leads to nan, replace 'and' with 'or'  
             # Disable this parameter
             return 0.0
         if lr_delay_steps > 0:

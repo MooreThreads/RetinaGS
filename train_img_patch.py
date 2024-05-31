@@ -16,28 +16,58 @@ from random import randint
 from utils.loss_utils import l1_loss, ssim
 from gaussian_renderer.render import render
 import sys
-from scene import SimpleScene, GaussianModel
+from scene import SimpleScene
+from scene.gaussian_nn_module import GaussianModel2
 from utils.general_utils import safe_state
-import uuid
+import uuid, math
 from tqdm import tqdm
 from utils.image_utils import psnr
 from lpipsPyTorch import LPIPS
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems, PatchListDataset
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
 
+from scene.cameras import Camera, EmptyCamera, Patch
+import gaussian_renderer.pytorch_gs_render.pytorch_render as pytorch_render
+
+H_DIV = 2
+W_DIV = 2
+
+def create_batch(patches:list):
+    # assume all patch has the same complete shape
+    batch_data, batch_size = {}, len(patches)
+    example_p:Patch = patches[0]
+    H, W = example_p.complete_height, example_p.complete_width
+
+    batch_data['packed_views'] = torch.stack([p.pack_up() for p in patches])
+    max_tile_num = max([len(p.all_tiles) for p in patches]) 
+    batch_data['tile_maps'] = torch.zeros((batch_size, max_tile_num), dtype=torch.int, device='cuda')
+    batch_data['tile_nums'] = []
+    for i in range(batch_size):
+        p:Patch = patches[i]
+        num_valid_tile = len(p.all_tiles)
+        batch_data['tile_maps'][i, :num_valid_tile] = p.all_tiles
+        batch_data['tile_nums'].append(num_valid_tile)
+    batch_data['tile_maps_sizes'] = torch.tensor([math.ceil(W/16), math.ceil(H/16)], device='cuda').view(-1, 2).repeat(batch_size, 1)    
+    batch_data['tile_maps_sizes_list'] = [math.ceil(W/16), math.ceil(H/16)]
+    batch_data['image_size_list'] = [math.ceil(W), math.ceil(H)]
+    batch_data['patches_cpu'] = patches  # it's okay to use patch on gpu 
+    return batch_data
+
 def render_wrapper(viewpoint_cam, gaussians, pipe, background):
-    viewpoint_cam.to_device('cuda')
-    return render(viewpoint_cam, gaussians, pipe, background)    
+    batch = create_batch([viewpoint_cam.to_device('cuda')])
+    rets = pytorch_render.render(gaussians, batch)
+    return rets[0]
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
+    gaussians = GaussianModel2(dataset.sh_degree, range_low=[-1000]*3, range_up=[1000]*3)
     scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     gaussians.training_setup(opt)
@@ -56,7 +86,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()
+    _train_dataset, _test_dataset = scene.getTrainCameras(), scene.getTestCameras()
+    train_dataset = PatchListDataset(_train_dataset, h_division=H_DIV, w_division=W_DIV)
+    test_dataset = PatchListDataset(_test_dataset, h_division=1, w_division=1)
+
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     NUM_EPOCH = (opt.iterations - first_iter + len(train_dataset) - 1) // len(train_dataset)
@@ -91,12 +124,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
             # Loss
             gt_image = viewpoint_cam.original_image.cuda()
-            # suppression of shooting noise
-            if opt.huber_loss_replacement_enable:
-                Ll1 = torch.nn.functional.huber_loss(image, gt_image)
-            else:
-                Ll1 = l1_loss(image, gt_image)
-
+            Ll1 = l1_loss(image, gt_image)
             if not opt.perception_loss:
                 loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
             else:
@@ -179,8 +207,11 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration in testing_iterations:
         # torch.cuda.empty_cache()
-        train_dataset = scene.getTrainCameras()        
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
+        _train_dataset, _test_dataset = scene.getTrainCameras(), scene.getTestCameras()
+        train_dataset = PatchListDataset(_train_dataset, h_division=H_DIV, w_division=W_DIV)
+        test_dataset = PatchListDataset(_test_dataset, h_division=1, w_division=1)
+        
+        validation_configs = ({'name': 'test', 'cameras' : test_dataset}, 
                               {'name': 'train', 'cameras' : [train_dataset[idx] for idx in range(0, len(train_dataset), 8)]})       
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:

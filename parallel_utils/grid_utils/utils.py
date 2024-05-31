@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from scene.cameras import Camera, ViewMessage
 from typing import NamedTuple
 import pickle
+import logging
 
 class SpaceBox:
     """ 
@@ -171,6 +172,9 @@ class Grid3DSpace:
         accum_on_3Dgrid(grid=self.load_cnt, value=load_np, index=position_int)
         return self.load_cnt
     
+    def accum_load_grid(self, load_np:np.ndarray):
+        self.load_cnt += load_np
+
     def clean_load(self):
         self.load_cnt *= 0
 
@@ -215,12 +219,12 @@ class BvhTreeNodeon3DGrid:
         self.level:int = level
         self.path:str = path    # '01' string encoding the path from root, '' for root
         self.split_orders:list = split_orders
-        self.split_dim = self.split_orders[self.level % len(self.split_orders)]   
+        self.split_dim:int = self.split_orders[self.level % len(self.split_orders)]   
         self.split_position_grid:int = None 
         self.left_child:BvhTreeNodeon3DGrid = None
         self.right_child:BvhTreeNodeon3DGrid = None
 
-    def split(self, limit:int = 1):
+    def split(self, limit:int=1, invalid_split_postion:int=None, random_radius:int=10, logger:logging.Logger=None):
         if (self.range_up[self.split_dim] - self.range_low[self.split_dim]) < 2:
             return []
         # meaningless to search best split with binary-search
@@ -233,6 +237,15 @@ class BvhTreeNodeon3DGrid:
         load_cum = np.cumsum(load_array)
         load_inbalance = np.absolute(2*load_cum - all_load)
         split_point = np.argmin(load_inbalance)
+
+        pre_split_position_grid = self.range_low[self.split_dim] + split_point + 1
+        if pre_split_position_grid == invalid_split_postion:
+            offset, random_radius = 0, max(random_radius, 1)
+            while offset == 0:
+                offset = np.random.randint(-random_radius, random_radius+1)
+            split_point += offset    
+            if logger is not None:
+                logger.info('solve invalid_split_postion with offset {}'.format(offset))    
 
         limit = np.clip(limit, 0, len(load_inbalance)//2)
         split_point = np.clip(split_point, limit, len(load_inbalance)-1-limit)
@@ -257,6 +270,11 @@ class BvhTreeNodeon3DGrid:
         split_world = self.split_position_grid * self.grid.voxel_size[self.split_dim] + self.grid.range_low[self.split_dim]
         return pos_np[self.split_dim] > split_world
 
+    def get_split_position_in_world(self):
+        if self.split_position_grid is None:
+            raise RuntimeError
+        split_world = self.split_position_grid * self.grid.voxel_size[self.split_dim] + self.grid.range_low[self.split_dim]
+        return split_world
 
     def overlap(self, box:BoxinGrid3D):
         # overlap 
@@ -312,7 +330,7 @@ class BvhTreeNodeon3DGrid:
         )
 
 
-def build_BvhTree_on_3DGrid(grid:Grid3DSpace, max_depth:int, split_orders=[0,1,2]):
+def build_BvhTree_on_3DGrid(grid:Grid3DSpace, max_depth:int, split_orders=[0,1,2], example_path2bvh_nodes={}, logger:logging.Logger=None):
     grid_size = grid.grid_size
     root = BvhTreeNodeon3DGrid(grid=grid, range_low=(0,0,0), range_up=grid_size, level=0, path='', split_orders=split_orders)
     q = [root]
@@ -321,7 +339,17 @@ def build_BvhTree_on_3DGrid(grid:Grid3DSpace, max_depth:int, split_orders=[0,1,2
     while len(q) > 0:
         node:BvhTreeNodeon3DGrid = q.pop(0)
         if (node is not None) and (node.level < max_depth):
-            new_nodes = node.split(limit=2**(max_depth - node.level))
+            if node.path in example_path2bvh_nodes:
+                example_node:BvhTreeNodeon3DGrid = example_path2bvh_nodes[node.path]
+                old_split_postion = example_node.split_position_grid
+                if logger is not None:
+                    logger.info('find old split at position {}'.format(old_split_postion))
+            else:
+                old_split_postion = None
+
+            new_nodes = node.split(limit=2**(max_depth - node.level), invalid_split_postion=old_split_postion, logger=logger)
+            if logger is not None:
+                logger.info('find new split at position {}'.format(node.split_position_grid))
             for _n in new_nodes:
                 if _n is not None:
                     q.append(_n)

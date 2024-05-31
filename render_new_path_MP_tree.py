@@ -26,6 +26,10 @@ from scene.cameras import Camera, EmptyCamera, ViewMessage
 from utils.datasets import CameraListDataset, PartOfDataset, EmptyCameraListDataset
 from scene.scene4bounded_gaussian import SceneV3
 
+from scipy.interpolate import splprep, splev
+from scipy.spatial.transform import Rotation, RotationSpline
+from scipy.special import comb
+
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -40,6 +44,7 @@ Z_NEAR = 0.01
 Z_FAR = 10*1000
 MAX_SIZE_SINGLE_GS = 1e7
 torch.multiprocessing.set_sharing_strategy('file_system')
+GLOBAL_LOGGER:logging.Logger = None
 
 def build_new_path():
     file = '/jfs/shengyi.chen/HT/Predict/MatrixCity/aerial_street_track/track_1.npy'
@@ -68,10 +73,9 @@ def build_new_path():
         poses[i, 0:3, 0:3] = pose_inv[0:3, 0:3]
 
     # v4，引入人类经验的三阶/四节点贝塞尔曲线
-    from scipy.interpolate import splprep, splev
-    from scipy.spatial.transform import Rotation, RotationSpline
-    from scipy.special import comb
-    
+    # from scipy.interpolate import splprep, splev
+    # from scipy.spatial.transform import Rotation, RotationSpline
+    # from scipy.special import comb
     
     def ratation_compute_multi(rotations, rs, start, end):        
         rots = Rotation.from_matrix(rotations)
@@ -176,6 +180,75 @@ def build_new_path():
     # return ret
     return EmptyCameraListDataset(ret)
 
+def find_views_on_split_plane(example_views:CameraListDataset, split_dim:int=0, split_value:float=0):
+    camera_x_align_world_axis = [
+        np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]]),
+        np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]),
+    ]
+
+    sample_rate = 1
+    fake_views = []
+    stand_camera = example_views[0]
+    stand_image_width = stand_camera.image_width
+    stand_image_height = example_views[0].image_height
+
+    for i in range(0, len(example_views), sample_rate):
+        camera:EmptyCamera = example_views.get_empty_item(i)
+        x_axis = np.array([1, 0, 0])
+        y_axis = np.array([0, 1, 0])
+
+        # -0.5, 0.2 , 0, 0.2, 0.5
+        for x_offset in [0]:
+            for y_angle in [0]:
+                for x_angle in [0]:
+                    fake_camera_center:np.ndarray = camera.camera_center.cpu().numpy()
+                    fake_camera_center[split_dim] = split_value + x_offset
+
+                    fake_r_y: Rotation = Rotation.from_rotvec(y_axis*y_angle)
+                    Ry_Camera:np.ndarray = fake_r_y.as_matrix()
+                    fake_r_x: Rotation = Rotation.from_rotvec(x_axis*x_angle)
+                    Rx_Camera:np.ndarray = fake_r_x.as_matrix()
+                    R_Camera = np.matmul(Rx_Camera, Ry_Camera)
+
+                    fake_C2W_R:np.ndarray = np.matmul(camera_x_align_world_axis[split_dim], R_Camera)
+                    # fake_C2W_R = camera.R
+
+                    fake_W2C_T:np.ndarray = -np.matmul(fake_C2W_R.T, np.reshape(fake_camera_center, (3,1)))
+                    # GLOBAL_LOGGER.info('example {} {}'.format(camera.image_width, camera.image_height))
+                    # print((camera.image_width, camera.image_height))
+                    fake_views.append(
+                        EmptyCamera(
+                            colmap_id=0,
+                            R=fake_C2W_R,
+                            T=fake_W2C_T.reshape(3),
+                            FoVx=camera.FoVx,
+                            FoVy=camera.FoVy,
+                            width_height=(stand_image_width, stand_image_height),
+                            gt_alpha_mask=None,
+                            image_name='',
+                            uid=0,
+                            data_device='cpu'
+                        )
+                    )
+
+    return fake_views
+
+def find_views_on_split_plane_dist(path2bvh_nodes:dict, example_views:CameraListDataset):
+    RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
+    split_dim_tensor:torch.Tensor = torch.zeros((1), device='cuda', dtype=torch.int)
+    split_value_tensor:torch.Tensor = torch.zeros((1), device='cuda', dtype=torch.float)
+
+    if RANK == 0:
+        root:ppu.BvhTreeNodeon3DGrid = path2bvh_nodes['']
+        split_dim_tensor[0] = root.split_dim
+        split_value_tensor[0] = root.get_split_position_in_world()
+    dist.broadcast(split_dim_tensor, src=0, group=None, async_op=False)
+    dist.broadcast(split_value_tensor, src=0, group=None, async_op=False) 
+
+    ret = find_views_on_split_plane(example_views, split_dim=split_dim_tensor[0], split_value=split_value_tensor[0])
+    return EmptyCameraListDataset(ret)
+
 class CamerawithRelation(Dataset):
     def __init__(self, dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger) -> None:
         super().__init__()
@@ -221,7 +294,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
             assert camera.uid == idx_start
             complete_relation[idx_start, :] = _relation_1_N
             if i%100 == 0:
-                logger.info("{}, {}, {}, {}".format(camera.image_height, camera.original_image.shape, camera.uid, _max_depth))
+                logger.info("{}, {}, {}, {}".format(camera.image_height, camera.image_width, camera.uid, _max_depth))
             idx_start += 1
     # if a row is all -1, set it to all 0
     all_minus_one = (complete_relation.sum(axis=-1) == -NUM_MODEL)  
@@ -232,9 +305,13 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 
 def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:list, NUM_MODEL:int, logger:logging.Logger):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
-
+    # opt is global args from parser
     # train_dataset: CameraListDataset = scene.getTrainCameras() 
-    train_dataset:CameraListDataset = build_new_path()
+    if opt.watch_split_plane:
+        example_dataset: CameraListDataset = scene.getTrainCameras()
+        train_dataset = find_views_on_split_plane_dist(path2bvh_nodes=path2nodes, example_views=example_dataset)
+    else:    
+        train_dataset:CameraListDataset = build_new_path()
     eval_test_dataset: CameraListDataset = []
     eval_train_list = train_dataset
     torch.cuda.synchronize()
@@ -316,7 +393,7 @@ def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, c
     view_messages = [ViewMessage(e, id=int(_id)) for e, _id in zip(packages, cameraUid_taskId_mainRank[:,1])]  
     task_id2cameraUid, uid2camera, task_id2camera = {}, {}, {}
     for camera in cams_gpu:
-        assert isinstance(camera, Camera)
+        # assert isinstance(camera, Camera)
         uid2camera[camera.uid] = camera 
     logger.info(uid2camera)    
     for row in cameraUid_taskId_mainRank:
@@ -334,10 +411,14 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
+    time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) if len(args.name) <=0 else args.name
+    scene.save_img_path = os.path.join(scene.model_path, 'img_{}'.format(time_str))
+    os.makedirs(scene.save_img_path, exist_ok=True)
 
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
-    assert ply_iteration > 0, 'can not find ply'
+    if len(args.single_ply) <= 0:
+        assert ply_iteration > 0, 'no single complete model, and can not find submodels'
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
         
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
@@ -385,7 +466,12 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         max_size=MAX_SIZE_SINGLE_GS,
     )
     logger.info(gaussians_group.get_info())
-    pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
+    if len(args.single_ply) > 0:
+        logger.info('load pretrained single model')
+        pgc.load_gs_from_single_ply(opt, gaussians_group, local_model_ids, scene, args.single_ply, logger)
+    else:
+        logger.info('load pretrained multiple models')
+        pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
     gaussians_group.set_SHdegree(ply_iteration//1000) 
     del scene.point_cloud
 
@@ -395,7 +481,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     # prepare dataset after the division of model/space, as the blender_order is affected by division
     # train_rlt, evalset_rlt need to be updated after every division of model/space
     train_dataset, eval_test_dataset, eval_train_list, train_rlt, evalset_rlt = init_datasets_dist(
-        scene=scene, opt=opt, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, NUM_MODEL=len(model_id2box), logger=logger 
+        scene=scene, opt=args, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, NUM_MODEL=len(model_id2box), logger=logger 
     )
     validation_configs = ({'name':'test', 'cameras': eval_test_dataset, 'rlt':evalset_rlt}, 
                         {'name':'train', 'cameras': eval_train_list, 'rlt':train_rlt})
@@ -522,8 +608,6 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # Progress bar
         if dist.get_rank() == 0:
             progress_bar.update(batch_size)
-            if iteration >= opt.iterations:
-                progress_bar.close()
                 
         step += 1
         torch.cuda.empty_cache()
@@ -548,6 +632,8 @@ def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, 
     mp_setup(rank, world_size, LOCAL_RANK, MASTER_ADDR, MASTER_PORT)
     dataset_args = train_args[1]
     tb_writer, logger = prepare_output_and_logger(dataset_args, train_args)
+    global GLOBAL_LOGGER
+    GLOBAL_LOGGER = logger
     with torch.no_grad():
         try:
             rendering(*train_args, (tb_writer, logger))
@@ -568,8 +654,10 @@ if __name__ == "__main__":
     parser.add_argument("--ply_iteration", type=int, default=-1)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-
+    parser.add_argument("--watch_split_plane", action="store_true")
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    parser.add_argument("--single_ply", type=str, default='', help='load all gs from a given .ply file')
+    parser.add_argument("--name", type=str, default='')
 
     args = parser.parse_args(sys.argv[1:])
 

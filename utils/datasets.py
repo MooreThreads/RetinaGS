@@ -9,7 +9,7 @@ from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON, loadCam, loadEmptyCam
 from PIL import Image
 from scene.dataset_readers import CameraInfo, SceneInfo
-from scene.cameras import Camera, EmptyCamera, ViewMessage
+from scene.cameras import Camera, EmptyCamera, ViewMessage, Patch
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -43,7 +43,9 @@ class CameraListDataset(Dataset):
         full_info = CameraInfo(uid=info.uid, R=info.R, T=info.T, FovY=info.FovY, FovX=info.FovX, image=image,
                               image_path=info.image_path, image_name=info.image_name, width=info.width, height=info.height)
 
-        return loadCam(self.args, id=idx, cam_info=full_info, resolution_scale=self.resolution_scale)   
+        camera:Camera = loadCam(self.args, id=idx, cam_info=full_info, resolution_scale=self.resolution_scale)   
+        # return camera.to_device('cuda')
+        return camera
 
     def get_empty_item(self, idx):
         info: CameraInfo = self.cameras_infos[idx]
@@ -87,6 +89,36 @@ class EmptyCameraListDataset(Dataset):
             data_device='cpu'
         )
     
+
+class PatchListDataset(Dataset):
+    def __init__(self, cameras_list:CameraListDataset, h_division:int=2, w_division:int=2) -> None:
+        super().__init__()
+        assert h_division >= 1 and w_division >= 1
+        self.cameras_list = cameras_list
+        self.h_division = h_division
+        self.w_division = w_division
+
+    def __len__(self):
+        return len(self.cameras_list) * self.h_division * self.w_division 
+    
+    def __getitem__(self, idx):
+        camera_idx = idx // (self.h_division * self.w_division)
+        patch_idx = idx % (self.h_division * self.w_division)
+
+        camera: Camera = self.cameras_list[camera_idx]
+        h_patch = camera.image_height // self.h_division
+        w_patch = camera.image_width // self.w_division
+
+        v_start = h_patch * (patch_idx // self.w_division)
+        in_last_row = (patch_idx // self.w_division) == (self.h_division - 1)
+        v_end = camera.image_height if in_last_row else (v_start + h_patch)
+
+        u_start = w_patch * (patch_idx % self.w_division)
+        in_last_column = (patch_idx % self.w_division) == (self.w_division - 1)
+        u_end = camera.image_width if in_last_column else (u_start + w_patch) 
+
+        return Patch(camera=camera, uid=idx, v_start=v_start, v_end=v_end, u_start=u_start, u_end=u_end)
+
 
 class DatasetRepeater(Dataset):
     '''

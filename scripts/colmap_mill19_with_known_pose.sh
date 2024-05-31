@@ -6,7 +6,8 @@ colmap feature_extractor \
     --database_path "$DATA_PATH/gt_pose/database.db" \
     --image_path "$DATA_PATH/images" \
     --ImageReader.single_camera 1 \
-    --SiftExtraction.use_gpu 1
+    --SiftExtraction.use_gpu 1 \
+    --SiftExtraction.gpu_index 7
 
 # 改内参 (optional)
 # from https://colmap.github.io/faq.html:
@@ -27,7 +28,7 @@ python scripts/change_image_id.py \
 colmap exhaustive_matcher \
     --database_path "$DATA_PATH/gt_pose/database.db" \
     --SiftMatching.use_gpu 1 \
-    --SiftMatching.gpu_index 0,1,2,3
+    --SiftMatching.gpu_index 7
 
 mkdir -p $DATA_PATH/sparse/0
 
@@ -41,11 +42,19 @@ colmap point_triangulator \
 
 # Note that the sparse reconstruction step is not necessary in order to compute a dense model from known camera poses. 
 # Assuming you computed a sparse model from the known camera poses, you can compute a dense model as follows:
+mkdir -p $DATA_PATH/gt_pose/sparse
+cp -r $DATA_PATH/sparse/0/* $DATA_PATH/gt_pose/sparse
+
+colmap image_undistorter \
+    --image_path $DATA_PATH/images \
+    --input_path $DATA_PATH/sparse/0 \
+    --output_path $DATA_PATH/dense
+
 colmap patch_match_stereo \
-    --workspace_path "$DATA_PATH/gt_pose/dense" \
+    --workspace_path "$DATA_PATH/dense" \
     --PatchMatchStereo.gpu_index 7
 
 colmap stereo_fusion \
-    --workspace_path "$DATA_PATH/gt_pose/dense" \
-    --output_path "$DATA_PATH/gt_pose/dense/fused.ply"
+    --workspace_path "$DATA_PATH/dense" \
+    --output_path "$DATA_PATH/dense/fused.ply"
 

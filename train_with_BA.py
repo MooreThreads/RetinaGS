@@ -1,22 +1,17 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
+# q: why is it necessary to write a almost the same script as train_with_dataset ?
+# a: I have not change some namesapce in the raster_gsslam, which yields conflicts between different rasters.
 
 import os
 import torch
 from torch.utils.data import DataLoader
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer.render import render
+from gaussian_renderer.render_gsslam import render_gsslam
+from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
 import sys
-from scene import SimpleScene, GaussianModel
+from scene.simple_scene_for_gsnn import SimpleScene4Gsnn
+from scene.gaussian_nn_module import GaussianModel2
+from scene.cameras import QandTofCamera, Camera
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -30,15 +25,19 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
-def render_wrapper(viewpoint_cam, gaussians, pipe, background):
+def render_wrapper(viewpoint_cam:Camera, gaussians:GaussianModel2, QT:QandTofCamera, weight:float, pipe, background):
     viewpoint_cam.to_device('cuda')
-    return render(viewpoint_cam, gaussians, pipe, background)    
+    gaussians.clean_cached_features()
+    q, t, camera = QT.apply_on_camera(idx=viewpoint_cam.uid, camera=viewpoint_cam, weight=weight)
+
+    return render_gsslam(camera, q, t, gaussians, pipe, background)  
+    # return render4BoundedGaussianModel(camera, gaussians, pipe, background)
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
-    scene = SimpleScene(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
+    gaussians = GaussianModel2(dataset.sh_degree, range_low=[-1000]*3, range_up=[1000]*3)
+    scene = SimpleScene4Gsnn(dataset, load_iteration=-1) # set load_iteration=-1 to enable search .ply
     scene.load2gaussians(gaussians)
     gaussians.training_setup(opt)
     print('spatial_lr_scale is {}'.format(gaussians.spatial_lr_scale))
@@ -47,6 +46,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                           version=opt.perception_net_version).to('cuda')
         print('lpips:{}.{}'.format(opt.perception_net_type, opt.perception_net_version))
     if checkpoint:
+        print('load from ckpt {}'.format(checkpoint))
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
@@ -57,6 +57,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
 
     train_dataset, test_dataset = scene.getTrainCameras(), scene.getTestCameras()
+    camera_parameters = QandTofCamera(len(train_dataset), training_args=opt)
+    print('build zeros camera parameter')
+    
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     NUM_EPOCH = (opt.iterations - first_iter + len(train_dataset) - 1) // len(train_dataset)
@@ -64,7 +67,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     iteration = first_iter
     for i_epoch in range(NUM_EPOCH):
-        train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene.get_batch)
+        train_loader = DataLoader(train_dataset, batch_size=1, prefetch_factor=4, shuffle=True, drop_last=False, num_workers=32, collate_fn=SimpleScene4Gsnn.get_batch)
 
         for data in train_loader:
             if iteration > opt.iterations:
@@ -72,6 +75,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             iter_start.record()
 
             gaussians.update_learning_rate(iteration)
+            camera_parameters.update_learning_rate(iteration)
 
             # Every 1000 its we increase the levels of SH up to a maximum degree
             if iteration % 1000 == 0:
@@ -85,8 +89,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 pipe.debug = True
 
             bg = torch.rand((3), device="cuda") if opt.random_background else background
-
-            render_pkg = render_wrapper(viewpoint_cam, gaussians, pipe, bg)
+            weight = 1.0 if iteration > opt.BA_start_iterations else 0.0
+            render_pkg = render_wrapper(viewpoint_cam, gaussians, camera_parameters, weight, pipe, bg)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
             # Loss
@@ -117,7 +121,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     progress_bar.close()
 
                 # Log and save
-                training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (pipe, background))
+                training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, gaussians, render_wrapper, (camera_parameters, 0.0, pipe, background))
                 if (iteration in saving_iterations):
                     print("\n[ITER {}] Saving Gaussians".format(iteration))
                     scene.save(iteration, gaussians=gaussians)
@@ -139,12 +143,21 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     
                 # Optimizer step
                 if iteration < opt.iterations:
-                    gaussians.optimizer.step()
-                    gaussians.optimizer.zero_grad(set_to_none = True)
+                    if iteration <= opt.BA_start_iterations:
+                        gaussians.optimizer.step()
+                    if iteration > opt.BA_start_iterations and (iteration//100)%2==0:
+                        gaussians.optimizer.step()
+                    if iteration > opt.BA_start_iterations and (iteration//100)%2==1:
+                        camera_parameters.optimizer.step()
+
+                    gaussians.optimizer.zero_grad(set_to_none = True)    
+                    camera_parameters.optimizer.zero_grad(set_to_none = True) 
+                    print("iteration {} pass, size {}, sign {}".format(iteration, gaussians._xyz.shape, camera_parameters.cam_q_w2c.abs().mean()))           
 
                 if (iteration in checkpoint_iterations):
                     print("\n[ITER {}] Saving Checkpoint".format(iteration))
                     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+                    torch.save((camera_parameters.state_dict(), iteration), scene.model_path + "/camera_delta" + str(iteration) + ".pth")
 
             iteration += 1
 
@@ -170,7 +183,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene, gaussians, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : SimpleScene4Gsnn, gaussians, renderFunc, renderArgs):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
@@ -217,8 +230,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3_000, 7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)

@@ -50,20 +50,20 @@ name_list = [
     "test_AGSR"    
     ]
 # 读取需要值
-for data_folder in data_folders:    
-    target_file = os.path.join(data_folder, "results.json")
+for target_file in benchmark_jsons:    
+    # target_file = os.path.join(data_folder, "results.json")
     with open(target_file, "r") as f:
         json_data = json.load(f)
-        num_GS.append(json_data['train']['GS'])
+        # num_GS.append(json_data['train']['GS'])
         
-        train_PSNR.append(json_data['train']['Mean of PSNR'])
-        train_SSIM.append(json_data['train']['Mean of SSIM'])
-        train_LPIPS.append(json_data['train']['Mean of LPIPS'])
-        train_GSPI.append(json_data['train']['Mean of GSPI'])
-        train_GSPP.append(json_data['train']['Mean of GSPP'])
-        train_MAPP.append(json_data['train']['Mean of MAPP'])
-        train_MAPP_2.append(json_data['train']['Mean of MAPP_2'])
-        train_AGSR.append(json_data['train']['AGSR'])
+        # train_PSNR.append(json_data['train']['Mean of PSNR'])
+        # train_SSIM.append(json_data['train']['Mean of SSIM'])
+        # train_LPIPS.append(json_data['train']['Mean of LPIPS'])
+        # train_GSPI.append(json_data['train']['Mean of GSPI'])
+        # train_GSPP.append(json_data['train']['Mean of GSPP'])
+        # train_MAPP.append(json_data['train']['Mean of MAPP'])
+        # train_MAPP_2.append(json_data['train']['Mean of MAPP_2'])
+        # train_AGSR.append(json_data['train']['AGSR'])
         
         test_PSNR.append(json_data['test']['Mean of PSNR'])
         test_SSIM.append(json_data['test']['Mean of SSIM'])
@@ -73,6 +73,11 @@ for data_folder in data_folders:
         test_MAPP.append(json_data['test']['Mean of MAPP'])
         test_MAPP_2.append(json_data['test']['Mean of MAPP_2'])
         test_AGSR.append(json_data['test']['AGSR'])
+
+
+        print('{}\npsnr{}\nssim{}\nlpips{}\n'.format(
+            target_file, json_data['test']['Mean of PSNR'], json_data['test']['Mean of SSIM'], json_data['test']['Mean of LPIPS']
+        ))
         
 # 格式化
 print(benchmark_jsons)

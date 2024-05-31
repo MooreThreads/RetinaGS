@@ -1,7 +1,7 @@
 import os
 import torch.distributed as dist
 from abc import ABC, abstractmethod
-from scene.cameras import Camera, ViewMessage
+from scene.cameras import Camera, ViewMessage, Patch
 from typing import NamedTuple
 
 

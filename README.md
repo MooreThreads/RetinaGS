@@ -11,24 +11,29 @@ python -m setup.py install
 
 Install revised diff-gaussian-rasterization (if necessary)
 
-MP Training
+GRID Training
 
-'''
+```
 cd rasterization_kernels/diff-gaussian-rasterization-half-gaussian
 python -m setup.py install
-
+```
 New Metric like GSPP and MAGS.
-
-'''
+```
 cd rasterization_kernels/diff-gaussian-rasterization-metric
 python -m setup.py install
-'''
+```
 
 # Train
-
-'''
+default train
+```
 python train.py  -s dataset/garden -m output/garden_train --eval 
+```
+use dataset to save GPU memory 
+```
 python train_with_dataset.py  -s dataset/garden -m output/garden_train_with_dataset --eval
+```
+train with GRID 
+```
 CUDA_VISIBLE_DEVICES=2,3 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
     train_MP_tree_partition.py -s /root/Nerf/Code/HT/DenseGaussian/dataset/garden\
@@ -41,7 +46,7 @@ CUDA_VISIBLE_DEVICES=2,3 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
         --densify_until_iter 15000 \
         --opacity_reset_interval 3000 \
         --max_batch_size 4  --max_load 8  
-'''
+```
 
 # Precision Validation
 
@@ -49,31 +54,26 @@ Shold be done after new implementation of diff-gaussian-rasterization and py fil
 
 On scene garden, eval (161 for train, 24 for test), default hyper-parameters (only -m + -s + -eval + about 3w iters):
 
-1. train.py: 
-
-33min25s
+train.py: 
 
 [ITER 30000] Evaluating all of test: PSNR 27.28
 
 [ITER 30000] Evaluating all of train: PSNR 30.00
 
-2. train_with_dataset.py: 
-
-60min51s
+train_with_dataset.py: 
 
 [ITER 30000] Evaluating all of test: PSNR 27.26
 
 [ITER 30000] Evaluating all of train: PSNR 29.92
 
-3. train_MP_tree_partition.py:
-
-双卡，104min08s
+train_MP_tree_partition.py:
 
 [ITER 30107] Evaluating test: PSNR 26.67
 
 [ITER 30107] Evaluating train: PSNR 28.23
 
 default parameters get worse result with bigger batchsize, if you just set batchsize=1(this also leads to low efficiency) num_gpu=2, num_model=4:
+
 [ITER 29946] Evaluating test: L1 0.028083428197229903 PSNR 27.158511241277058
 
 [ITER 29946] Evaluating train: L1 0.02086768550798297 PSNR 29.720123386383058
@@ -91,7 +91,7 @@ default parameters get worse result with bigger batchsize, if you just set batch
 as Mill_19 provide train/val set, we just follow its original division
 do remember to config the path in scripts/mega_nerf_to_colmap.py to process data and organize files
 so that SimpleScene would recongnize them
-'''
+```
 example structure:
 --path/to/model
     |--images/ (train images)
@@ -99,4 +99,4 @@ example structure:
     |--test
         |--images (test images)
         |--sparse/cameras.txt and images.txt
-'''
+```

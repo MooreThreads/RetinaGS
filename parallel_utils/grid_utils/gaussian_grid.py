@@ -147,14 +147,19 @@ def load_grid_dist(scene:SceneV3, ply_iteration:int, SCENE_GRID_SIZE: int):
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = grid_numpy[0], grid_numpy[1], grid_numpy[2]
     return SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict
 
-def divide_model_by_load(scene_3d_grid:ppu.Grid3DSpace, bvh_depth:int, load:np.ndarray, position:np.ndarray, logger:logging.Logger, SPLIT_ORDERS:list):
+def divide_model_by_load(scene_3d_grid:ppu.Grid3DSpace, bvh_depth:int, load:np.ndarray, position:np.ndarray, logger:logging.Logger, SPLIT_ORDERS:list, pre_load_grid:np.ndarray=None):
     """
+    load: (N,), position (N, 3)
+    pre_load_grid: shape of scene_3d_grid.load_cnt
     SPLIT_ORDERS is a list of [0/1/2] which specify the splited dimensions of bvh tree 
     """
     scene_3d_grid.clean_load()
-    if load is None:
-        load = np.ones((position.shape[0], ), dtype=float)
-    scene_3d_grid.accum_load(load_np=load, position=position)
+    if pre_load_grid is not None:
+        scene_3d_grid.accum_load_grid(load_np=pre_load_grid)
+    else:
+        if load is None:
+            load = np.ones((position.shape[0], ), dtype=float)
+        scene_3d_grid.accum_load(load_np=load, position=position)
     path2bvh_nodes = ppu.build_BvhTree_on_3DGrid(scene_3d_grid, max_depth=bvh_depth, split_orders=SPLIT_ORDERS)
     # find leaf-nodes as model space
     sorted_leaf_nodes = []
@@ -298,7 +303,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 
     for i in tqdm(range(len(train_dataset))):
         camera = train_dataset.get_empty_item(idx=i)    # only need view frustum
-        assert isinstance(camera, (Camera, EmptyCamera))
+        # assert isinstance(camera, (Camera, EmptyCamera))
         # get the depth of all nodes
         all_node_depth = {'':0}
         for path,node in path2nodes.items():
@@ -347,7 +352,7 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 def get_relation_vector(camera:Camera, z_near:float, z_far, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger):
     NUM_DATA, NUM_MODEL = 1, len(sorted_leaf_nodes)
     complete_relation = np.zeros((NUM_DATA, NUM_MODEL), dtype=int) - 1
-    assert isinstance(camera, (Camera, EmptyCamera))
+    # assert isinstance(camera, (Camera, EmptyCamera))
     # get the depth of all nodes
     all_node_depth = {'':0}
     for path,node in path2nodes.items():

@@ -75,6 +75,7 @@ class PipelineParams(ParamGroup):
         self.debug = False
         self.max_batch_size = 2
         self.max_load = 2
+        self.render_version = 'default'
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):
@@ -94,7 +95,10 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        self.lambda_perception = 0.15
+        self.perception_loss= False
+        self.perception_net_type = "vgg"
+        self.perception_net_version = "0.1"
+        self.lambda_perception = 0.1
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
@@ -125,7 +129,21 @@ class OptimizationParams(ParamGroup):
         self.lambda_perception = 0.1
         self.huber_loss_replacement_enable = False
         self.only_prune_via_screen_space_enable = False     
-        self.screen_size_threshold   = 20
+        self.screen_size_threshold = 20
+        self.BA = False
+        self.BA_start_iterations = 20_000
+        self.camera_q_lr_init = 0.0016
+        self.camera_q_lr_final = 0.000016
+        self.camera_q_lr_delay_mult = 0.01
+        self.camera_q_lr_max_steps = 30_000
+        self.camera_t_lr_init = 0.0016
+        self.camera_t_lr_final = 0.000016
+        self.camera_t_lr_delay_mult = 0.01
+        self.camera_t_lr_max_steps = 30_000
+
+        self.scales_reg_2d = False
+        self.scales_reg_2d_lr = 0.001
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
