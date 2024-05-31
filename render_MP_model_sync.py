@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, math
 import traceback, uuid, logging, time, shutil, glob
 from tqdm import tqdm
 import numpy as np
@@ -16,8 +16,8 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
 from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch
-from utils.workload_utils import NaiveWorkloadBalancer
 
+import parallel_utils.schedulers.optical_field_segment as pso
 import parallel_utils.schedulers.dynamic_space as psd 
 import parallel_utils.grid_utils.core as pgc
 import parallel_utils.grid_utils.gaussian_grid as pgg
@@ -25,8 +25,14 @@ import parallel_utils.grid_utils.utils as ppu
 
 from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
-from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
+from utils.datasets import CameraListDataset, PartOfDataset, EmptyCameraListDataset
 from scene.scene4bounded_gaussian import SceneV3
+from gaussian_renderer.render_half_gs import RenderInfoFromGS, render4renderinfo
+
+from scipy.interpolate import splprep, splev
+from scipy.spatial.transform import Rotation, RotationSpline
+from scipy.special import comb
+from typing import List, Dict, Tuple
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -38,17 +44,214 @@ except ImportError:
 MAX_GS_CHANNEL = 59*3
 SPLIT_ORDERS = [0, 1]
 SCENE_GRID_SIZE = np.array([2*1024, 2*1024, 1], dtype=int)
-EVAL_PSNR_INTERVAL = 8
-MAX_SIZE_SINGLE_GS = int(6e7)
 Z_NEAR = 0.01
-Z_FAR = 1*1000
-SAVE_INTERVAL_EPOCH = 10
-SAVE_INTERVAL_ITER = 5000
-SKIP_PRUNE_AFTER_RESET = 3000
-
+Z_FAR = 10*1000
+MAX_SIZE_SINGLE_GS = 1e7
 torch.multiprocessing.set_sharing_strategy('file_system')
+GLOBAL_LOGGER:logging.Logger = None
 
-GLOBAL_CKPT_CLEANER = pgc.ckpt_cleaner(max_len=5)
+def build_new_path():
+    file = '/jfs/shengyi.chen/HT/Predict/MatrixCity/aerial_street_track/track_1.npy'
+    WIDTH = 1920
+    HEIGHT = 1080
+    # WIDTH = 1920/4
+    # HEIGHT = 1080/4
+    
+    # FoVx = math.atan(WIDTH/2/2317.6449482429634)*2
+    # FoVy = math.atan(HEIGHT/2/2317.6449482429634)*2
+    Fov_angle_y = 70.320092
+    
+    FoVy = (Fov_angle_y / 180.0) * math.pi
+    focal_y = (HEIGHT / 2) / math.tan(FoVy / 2)
+    focal_x = focal_y
+    FoVx  = math.atan(WIDTH/2/focal_x)*2
+    
+    # Poses is in W2C
+    poses = np.load(file)
+    
+    for i in range(0, poses.shape[0]):
+        # 手系变换（Pose是OpenGL的在线浏览器导出，但是代码是根据COLMAP格式写的，change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)）
+        poses[i, 0:2, :] *= -1
+        # scene.cameras.EmptyCamera的要求R是C2W，T是W2C（R is stored transposed due to 'glm' in CUDA code）
+        pose_inv = np.linalg.inv(poses[i])
+        poses[i, 0:3, 0:3] = pose_inv[0:3, 0:3]
+
+    # v4，引入人类经验的三阶/四节点贝塞尔曲线
+    # from scipy.interpolate import splprep, splev
+    # from scipy.spatial.transform import Rotation, RotationSpline
+    # from scipy.special import comb
+    
+    def ratation_compute_multi(rotations, rs, start, end):        
+        rots = Rotation.from_matrix(rotations)
+        spline = RotationSpline(np.linspace(0, 1, rotations.shape[0]), rots)  
+        N = end - start
+        ratios = np.linspace(0, 1, N)        
+        for i in range(0, N):
+            rs[start + i, :, :] = spline(ratios[i]).as_matrix()
+            
+    def find_nearest_rotation(position, poses):
+        position_in_original = poses[:, :3, 3]
+        distances = np.linalg.norm(position_in_original - position, axis=1)
+        index = np.argmin(distances)
+
+        return poses[index, :3, :3]
+    
+    # 先验
+    N_curve = 3
+    curve_rank = 5 # 指节点数
+    step_curve = 1
+    N_frames_per_curve = 120   
+
+    # N_curve = 3
+    # curve_rank = 5 # 指节点数
+    # step_curve = 1
+    # N_frames_per_curve = 120   
+    
+    # 生成
+    rs = np.zeros((N_frames_per_curve * N_curve + 1, 3, 3))
+    ps = np.zeros((N_frames_per_curve * N_curve + 1, 3))    
+    
+    # 计算平移，贝塞尔曲线
+    for i_curve in range(N_curve):       
+              
+        # 控制点，左闭右闭，保证重合（需要N_curve*(curve_rank - 1) + 1个关键点）
+        start_in_original = i_curve * step_curve * (curve_rank - 1)
+        end_in_original =  (i_curve + 1) * step_curve * (curve_rank - 1)        
+        order_in_original = range(start_in_original, end_in_original + 1, step_curve)                 
+        
+        # 计算点
+        control_points = np.zeros((curve_rank, 4, 4))
+        for i in range(0, curve_rank):
+            control_points[i, :, :] = poses[order_in_original[i], :, :]
+        # 将点分解为单独的坐标数组
+        x = control_points[:, 0, 3]
+        y = control_points[:, 1, 3]
+        z = control_points[:, 2, 3]
+        # 用splprep进行插值
+        # tck, u = splprep([x, y, z], s=0, k=curve_rank-1)
+        tck, u = splprep([x, y, z], k=curve_rank-1)
+        new_points = splev(np.linspace(0, 1, N_frames_per_curve + 1), tck)
+        # new_points现在包含插值点的x，y和z坐标
+        new_x = new_points[0]
+        new_y = new_points[1]
+        new_z = new_points[2]
+        # 更新值
+        start_in_new = i_curve * N_frames_per_curve
+        end_in_new = (i_curve + 1) * N_frames_per_curve + 1
+        ps[start_in_new:end_in_new, 0] = new_x
+        ps[start_in_new:end_in_new, 1] = new_y
+        ps[start_in_new:end_in_new, 2] = new_z
+        
+        # # 计算旋转 - 区间插值
+        # step_rataion = 40
+        # section = range(start_in_new, end_in_new, step_rataion)
+        # section_ratation = np.zeros((len(section), 3, 3))
+        # for i_section in range(len(section)):
+        #     section_ratation[i_section] = find_nearest_rotation(ps[section[i_section], :], poses)          
+        # # 区间连续插值
+        # ratation_compute_multi(section_ratation, rs, start_in_new, end_in_new)
+    
+    # 计算旋转，全部插值
+    section_ratation = poses[:, 0:3, 0:3]
+    ratation_compute_multi(section_ratation, rs, 0, N_frames_per_curve * N_curve + 1)
+        
+    # 变为程序可读
+    P = []    
+    for i in range(0, len(rs)):
+        pose = np.eye(4, dtype=np.float32)        
+        pose[:3, :3] = rs[i]
+        pose[0, 3] = ps[i, 0]
+        pose[1, 3] = ps[i, 1]
+        pose[2, 3] = ps[i, 2]
+        P.append(pose)
+    
+    ret = []  
+    for pose in P:
+        ret.append(
+            EmptyCamera(
+                colmap_id=0,
+                R=pose[:3, :3],
+                T=pose[:3, 3],
+                FoVx=FoVx,
+                FoVy=FoVy,
+                width_height=(WIDTH, HEIGHT),
+                gt_alpha_mask=None,
+                image_name='',
+                uid=0,
+                data_device='cpu'
+            )
+        )
+    # return ret
+    return EmptyCameraListDataset(ret)
+
+def find_views_on_split_plane(example_views:CameraListDataset, split_dim:int=0, split_value:float=0):
+    camera_x_align_world_axis = [
+        np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]]),
+        np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]),
+    ]
+
+    sample_rate = 1
+    fake_views = []
+    stand_camera = example_views[0]
+    stand_image_width = stand_camera.image_width
+    stand_image_height = example_views[0].image_height
+
+    for i in range(0, len(example_views), sample_rate):
+        camera:EmptyCamera = example_views.get_empty_item(i)
+        x_axis = np.array([1, 0, 0])
+        y_axis = np.array([0, 1, 0])
+
+        # -0.5, 0.2 , 0, 0.2, 0.5
+        for x_offset in [0]:
+            for y_angle in [0]:
+                for x_angle in [0]:
+                    fake_camera_center:np.ndarray = camera.camera_center.cpu().numpy()
+                    fake_camera_center[split_dim] = split_value + x_offset
+
+                    fake_r_y: Rotation = Rotation.from_rotvec(y_axis*y_angle)
+                    Ry_Camera:np.ndarray = fake_r_y.as_matrix()
+                    fake_r_x: Rotation = Rotation.from_rotvec(x_axis*x_angle)
+                    Rx_Camera:np.ndarray = fake_r_x.as_matrix()
+                    R_Camera = np.matmul(Rx_Camera, Ry_Camera)
+
+                    fake_C2W_R:np.ndarray = np.matmul(camera_x_align_world_axis[split_dim], R_Camera)
+                    # fake_C2W_R = camera.R
+
+                    fake_W2C_T:np.ndarray = -np.matmul(fake_C2W_R.T, np.reshape(fake_camera_center, (3,1)))
+                    # GLOBAL_LOGGER.info('example {} {}'.format(camera.image_width, camera.image_height))
+                    # print((camera.image_width, camera.image_height))
+                    fake_views.append(
+                        EmptyCamera(
+                            colmap_id=0,
+                            R=fake_C2W_R,
+                            T=fake_W2C_T.reshape(3),
+                            FoVx=camera.FoVx,
+                            FoVy=camera.FoVy,
+                            width_height=(stand_image_width, stand_image_height),
+                            gt_alpha_mask=None,
+                            image_name='',
+                            uid=0,
+                            data_device='cpu'
+                        )
+                    )
+
+    return fake_views
+
+def find_views_on_split_plane_dist(path2bvh_nodes:dict, example_views:CameraListDataset):
+    RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
+    split_dim_tensor:torch.Tensor = torch.zeros((1), device='cuda', dtype=torch.int)
+    split_value_tensor:torch.Tensor = torch.zeros((1), device='cuda', dtype=torch.float)
+
+    if RANK == 0:
+        root:ppu.BvhTreeNodeon3DGrid = path2bvh_nodes['']
+        split_dim_tensor[0] = root.split_dim
+        split_value_tensor[0] = root.get_split_position_in_world()
+    dist.broadcast(split_dim_tensor, src=0, group=None, async_op=False)
+    dist.broadcast(split_value_tensor, src=0, group=None, async_op=False) 
+
+    ret = find_views_on_split_plane(example_views, split_dim=split_dim_tensor[0], split_value=split_value_tensor[0])
+    return EmptyCameraListDataset(ret)
 
 class CamerawithRelation(Dataset):
     def __init__(self, dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger) -> None:
@@ -79,24 +282,6 @@ class CamerawithRelation(Dataset):
 
         return max_depth, relation_1_N, camera 
 
-def save_GS(iteration, model_path, gaussians_group:BoundedGaussianModelGroup, path2node:dict):    
-    RANK = dist.get_rank()
-    print("\n[rank {}, ITER {}] Saving Gaussians".format(RANK, iteration))
-    point_cloud_path = os.path.join(model_path, "point_cloud/iteration_{}".format(iteration))
-    GLOBAL_CKPT_CLEANER.add(point_cloud_path)
-    for model_id in gaussians_group.all_gaussians: 
-        _model: BoundedGaussianModel = gaussians_group.all_gaussians[model_id]
-        # GS model may not be organized as nn.Module
-        # thus save GS model as .ply and save optimizer as .pt
-        _model.save_ply(os.path.join(point_cloud_path, "point_cloud_{}.ply".format(model_id)))
-        torch.save(
-            _model.optimizer.state_dict(),
-            os.path.join(point_cloud_path, "adam_{}.pt".format(model_id))
-            )
-    
-    if path2node is not None:
-        ppu.save_BvhTree_on_3DGrid(path2node, os.path.join(point_cloud_path, "tree_{}.txt".format(RANK)))
-
 def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted_leaf_nodes:list, logger:logging.Logger):
     NUM_DATA, NUM_MODEL = len(train_dataset), len(sorted_leaf_nodes)
     complete_relation = np.zeros((NUM_DATA, NUM_MODEL), dtype=int) - 1
@@ -109,11 +294,11 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
     for i, batch in tqdm(enumerate(data_loader)):
         for _data in batch:
             _max_depth, _relation_1_N, camera = _data
-            # assert isinstance(camera, (Camera, EmptyCamera))
+            assert isinstance(camera, (Camera, EmptyCamera))
             assert camera.uid == idx_start
             complete_relation[idx_start, :] = _relation_1_N
             if i%100 == 0:
-                logger.info("{}, {}, {}, {}".format(camera.image_height, camera.original_image.shape, camera.uid, _max_depth))
+                logger.info("{}, {}, {}, {}".format(camera.image_height, camera.image_width, camera.uid, _max_depth))
             idx_start += 1
     # if a row is all -1, set it to all 0
     all_minus_one = (complete_relation.sum(axis=-1) == -NUM_MODEL)  
@@ -124,13 +309,15 @@ def get_relation_matrix(train_dataset:CameraListDataset, path2nodes:dict, sorted
 
 def init_datasets_dist(scene:SceneV3, opt, path2nodes:dict, sorted_leaf_nodes:list, NUM_MODEL:int, logger:logging.Logger):
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
-
-    train_dataset: CameraListDataset = scene.getTrainCameras() 
-    eval_test_dataset: CameraListDataset = scene.getTestCameras()
-
-    # train_dataset = eval_test_dataset
-
-    eval_train_list = DatasetRepeater(train_dataset, len(train_dataset)//EVAL_PSNR_INTERVAL, False, EVAL_PSNR_INTERVAL)
+    # opt is global args from parser
+    # train_dataset: CameraListDataset = scene.getTrainCameras() 
+    if opt.watch_split_plane:
+        example_dataset: CameraListDataset = scene.getTrainCameras()
+        train_dataset = find_views_on_split_plane_dist(path2bvh_nodes=path2nodes, example_views=example_dataset)
+    else:    
+        train_dataset:CameraListDataset = build_new_path()
+    eval_test_dataset: CameraListDataset = []
+    eval_train_list = train_dataset
     torch.cuda.synchronize()
     if RANK == 0:
         assert len(sorted_leaf_nodes) == NUM_MODEL        
@@ -206,7 +393,8 @@ def prepare_output_and_logger(args, all_args):
 
     return tb_writer, logger
 
-def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
+def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, packages:torch.Tensor, cams_gpu:list, logger:logging.Logger): 
+    view_messages = [ViewMessage(e, id=int(_id)) for e, _id in zip(packages, cameraUid_taskId_mainRank[:,1])]  
     task_id2cameraUid, uid2camera, task_id2camera = {}, {}, {}
     for camera in cams_gpu:
         # assert isinstance(camera, Camera)
@@ -217,37 +405,32 @@ def unpack_data(cameraUid_taskId_mainRank:torch.Tensor, cams_gpu:list, logger:lo
         task_id2cameraUid[tid] = uid
         task_id2camera[tid] = uid2camera[uid]
         
-    return task_id2cameraUid, uid2camera, task_id2camera
+    return view_messages, task_id2cameraUid, uid2camera, task_id2camera
+   
+def gather_render_info(local_pool:Dict, extra_pool:Dict, local_model_ids:List[int], logger:logging.Logger):
+    id2infos = {int(_id):[] for _id in local_model_ids}
+    for p in [local_pool, extra_pool]:
+        for src_dst, info in p.items():
+            src, dst = src_dst
+            if dst not in id2infos:
+                continue
+            # make sure that render_info from the model itself occurs first
+            if src == dst:
+                id2infos[dst].insert(0, info)
+            else:
+                id2infos[dst].append(info)
+    ret = {}
+    for mid, info_list in id2infos.items():
+        ret[mid] = RenderInfoFromGS(
+            means3D = torch.cat([info.means3D for info in info_list], dim=0).contiguous(),
+            means2D = torch.cat([info.means2D for info in info_list], dim=0).contiguous(),
+            shs = torch.cat([info.shs for info in info_list], dim=0).contiguous(),
+            opacity = torch.cat([info.opacity for info in info_list], dim=0).contiguous(),
+            scales = torch.cat([info.scales for info in info_list], dim=0).contiguous(),
+            rotations = torch.cat([info.rotations for info in info_list], dim=0).contiguous()
+        )
 
-def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, opt, pipe, logger: logging.Logger):
-    t0 = time.time() 
-    loss_dict = {}
-    loss_main_rank, Ll1_main_rank = torch.tensor(0.0, device='cuda'), torch.tensor(0.0, device='cuda')    
-    _t_gather, _t_loss = 0, 0
-    
-    for k in images:
-        _t0 = time.time()
-        task_id, task_main_rank = k
-        image = images[k]['render']
-        ori_camera:Camera = task_id2camera[task_id]
-        gt_image = ori_camera.original_image.to('cuda')
-
-        _t1 = time.time()
-        _t_gather += (_t1 - _t0)
-        
-        _t0 = time.time()
-        Ll1 = l1_loss(image, gt_image)
-
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        loss_dict[k] = loss
-                
-        loss_main_rank += loss
-        Ll1_main_rank += Ll1
-        _t1 = time.time()
-        _t_loss += (_t1 - _t0)
-        logger.debug('taskid_mainRank {}, loss {}, l1 {}'.format(k, loss, Ll1))
-
-    return loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss
+    return ret
 
 def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, checkpoint_iterations, debug_from, LOGGERS):
     # training-constant states
@@ -257,12 +440,14 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
-    scene.save_img_path = os.path.join('/jfs/burning/profiles/matrix_city/train/rank_{}'.format(RANK))
+    time_str = time.strftime("%Y_%m_%d_%H_%M", time.localtime()) if len(args.name) <=0 else args.name
+    scene.save_img_path = os.path.join(scene.model_path, 'img_{}'.format(time_str))
     os.makedirs(scene.save_img_path, exist_ok=True)
 
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
-    assert ply_iteration > 0, 'can not find ply'
+    if len(args.single_ply) <= 0:
+        assert ply_iteration > 0, 'no single complete model, and can not find submodels'
     SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE, path2node_info_dict = pgg.load_grid_dist(scene=scene, ply_iteration=ply_iteration, SCENE_GRID_SIZE=SCENE_GRID_SIZE)
         
     scene_3d_grid = ppu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
@@ -274,17 +459,22 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     background = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
     final_background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")    
 
-    task_parser = psd.TaskParser(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
-    space_task_parser = psd.SpaceTaskMatcher(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
-    scheduler = psd.BasicSchedulerwithDynamicSpace(
-        task_parser=task_parser, logger=logger, tb_writer=tb_writer,
-        func_pack_up=BoundedGaussianModelGroup.pack_up_render_ret,
-        func_grad_pack_up=pgc.build_check_and_pack_up_grad(logger=logger),
-        func_unpack_up=BoundedGaussianModelGroup.unpack_up_render_ret,
-        func_grad_unpack_up=BoundedGaussianModelGroup.unpack_up_grad_of_render_ret,
-        func_space=pgc.func_space_for_render,
-        func_grad_space=pgc.func_space_for_grad_of_render,
-        batch_isend_irecv_version=0 # use nccl batched_isend_irecv 
+    # handles: 
+    zipper_extra_gs, unzipper_grad_extra_gs, space4render_info, unzipper_extra_gs = pgg.build_zip_unzip_for_render_info(dataset_args.sh_degree)
+    space4extra_gs = lambda x: space4render_info(length=x.length)
+
+    task_parser = pso.Parser4OpticalFieldSegment(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
+    space_task_parser = pso.SpaceTaskMatcher(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
+    scheduler = pso.BasicScheduler4OpticalFieldSegment(
+        logger=logger, tb_writer=tb_writer, batch_isend_irecv_version=0,
+        zip_extra_gs=zipper_extra_gs, unzip_extra_gs=unzipper_extra_gs, space_extra_gs=space4extra_gs,
+        zip_grad_extra_gs=zipper_extra_gs, unzip_grad_extra_gs=unzipper_grad_extra_gs, space_grad_extra_gs=space4extra_gs,
+        zip_render_ret=BoundedGaussianModelGroup.pack_up_render_ret, 
+        unzip_render_ret=BoundedGaussianModelGroup.unpack_up_render_ret, 
+        space_render_ret=pgc.func_space_for_render,
+        zip_grad_render_ret=pgc.build_check_and_pack_up_grad(logger=logger),
+        unzip_grad_render_ret=BoundedGaussianModelGroup.unpack_up_grad_of_render_ret,
+        space_grad_render_ret=pgc.func_space_for_grad_of_render
     )
     local_func_blender = pgg.build_func_blender(final_background=final_background, logger=logger)
 
@@ -310,8 +500,12 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         max_size=MAX_SIZE_SINGLE_GS,
     )
     logger.info(gaussians_group.get_info())
-    logger.info('try to load ply at iteration {}'.format(ply_iteration))
-    pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
+    if len(args.single_ply) > 0:
+        logger.info('load pretrained single model')
+        pgc.load_gs_from_single_ply(opt, gaussians_group, local_model_ids, scene, args.single_ply, logger)
+    else:
+        logger.info('load pretrained multiple models')
+        pgc.load_gs_from_ply(opt, gaussians_group, local_model_ids, scene, ply_iteration, logger)
     gaussians_group.set_SHdegree(ply_iteration//1000) 
     del scene.point_cloud
 
@@ -321,7 +515,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     # prepare dataset after the division of model/space, as the blender_order is affected by division
     # train_rlt, evalset_rlt need to be updated after every division of model/space
     train_dataset, eval_test_dataset, eval_train_list, train_rlt, evalset_rlt = init_datasets_dist(
-        scene=scene, opt=opt, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, NUM_MODEL=len(model_id2box), logger=logger 
+        scene=scene, opt=args, path2nodes=path2bvh_nodes, sorted_leaf_nodes=sorted_leaf_nodes, NUM_MODEL=len(model_id2box), logger=logger 
     )
     validation_configs = ({'name':'test', 'cameras': eval_test_dataset, 'rlt':evalset_rlt}, 
                         {'name':'train', 'cameras': eval_train_list, 'rlt':train_rlt})
@@ -333,25 +527,26 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         iteration = ply_iteration
     logger.info('start from iteration from {}'.format(iteration))
    
-    # partOftrain = PartOfDataset(train_dataset, empty=False, start=0, end=None)
-    _step = 20
-    partOftrain = DatasetRepeater(
-        train_dataset, 
-        repeat_utill=len(train_dataset)//_step, 
-        empty=False, step=_step)
+    partOftrain = PartOfDataset(train_dataset, empty=False, start=0, end=None)
     train_loader = DataLoader(partOftrain, 
-                                batch_size=1, num_workers=2, prefetch_factor=2, drop_last=False,
+                                batch_size=1, num_workers=8, prefetch_factor=2, drop_last=False,
                                 shuffle=False, collate_fn=SceneV3.get_batch)
     progress_bar = tqdm(range(first_iter, len(partOftrain)), desc="Training progress") if RANK == 0 else None 
 
     step, t_iter_end = 0, time.time()
+
+
+    local_render_info_pool, GLOBAL_SEND_GS_AMOUNT_CPU = pgg.naive_render_info_gather(
+        groups=gaussians_group, modelId2Boxes=model_id2box, scene_3d_grid=scene_3d_grid, logger=logger
+    )
+    send_extra_gs, recv_extra_gs = task_parser.parser_extra_gs_task(GLOBAL_SEND_GS_AMOUNT_CPU, modelId2rank=model_id2rank)
+    extra_render_info_pool = scheduler._exchange_extra_gs(local_render_info_pool, send_extra_gs, recv_extra_gs)
+    # merge render_info
+    merged_info = gather_render_info(local_render_info_pool, extra_render_info_pool, gaussians_group.model_id_list, logger)
+         
     for ids_data in train_loader:
         step += 1
-        t_data = time.time()
-        if tb_writer:
-            tb_writer.add_scalar('cnt/loader_iter', t_data-t_iter_end, iteration) 
-        logger.info('loader iter time {}'.format(t_data-t_iter_end))
-
+        
         data = ids_data
         batch_size = len(data)  # list of Camera/None, batchsize can be dynamic in the future    
         assert batch_size > 0, "get empty group"             
@@ -360,56 +555,49 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # rank 0 samples cameras and broadcast the data 
         t0 = time.time()
         cameraUid_taskId_mainRank = torch.zeros((batch_size, 3), dtype=torch.int, device='cuda') 
-        # packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
+        packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
         data_gpu = [_cmr.to_device('cuda') for _cmr in data]
         if RANK == 0:  
             for i, camera in enumerate(data_gpu):
                 cameraUid_taskId_mainRank[i, 0] = camera.uid
                 cameraUid_taskId_mainRank[i, 1] = iteration + i
                 cameraUid_taskId_mainRank[i, 2] = 0
-                # packages[i] = camera.pack_up(device='cuda')
+                packages[i] = camera.pack_up(device='cuda')
         dist.broadcast(cameraUid_taskId_mainRank, src=0, async_op=False, group=None)
         logger.info('broadcast cameraUid_taskId_mainRank {}, iteration {}'.format(cameraUid_taskId_mainRank, iteration))
-        # dist.broadcast(packages, src=0, async_op=False, group=None)
-        # logger.info('broadcast packages, iteration {}'.format(iteration))
+        dist.broadcast(packages, src=0, async_op=False, group=None)
+        logger.info('broadcast packages, iteration {}'.format(iteration))
         dist.barrier()   
-        t1 = time.time()
-        broadcast_task_cost += (t1-t0)
-        if tb_writer:
-            tb_writer.add_scalar('cnt/broadcast_sync', t1-t0, iteration) 
+  
         # end of broadcast and sync, unpack training-data
-        t0 = time.time()
         cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
-        task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, data_gpu, logger)
-        t1 = time.time()
-        data_cost += (t1-t0)
-        if tb_writer:
-            tb_writer.add_scalar('cnt/prepare_data', t1-t0, iteration) 
-
+        view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
+       
         # logger.info(task_id2camera)
-        mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in data_gpu])
+        mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
         _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
         logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
         # default debug_from is -1, never debug
         if debug_from in range(iteration, iteration + batch_size):
             pipe.debug = True
 
-        t0 = time.time()    
+        send_render_ret, recv_render_ret, render_tasks, main_rank_tasks = task_parser.parse_task_tensor(
+            model_id2rank, cameraUid_taskId_mainRank[:, [1,2]], train_rlt[_uids, :], view_messages
+        )
         # render contents and exchange them between ranks
-        main_rank_tasks, local_render_rets, extra_render_rets = scheduler.forward_pass(
-            func_render=render_func,
-            modelId2rank=model_id2rank,
-            _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
-            _relation_matrix=train_rlt[_uids, :],
-            views=data_gpu)
-        t1 = time.time()
-        if tb_writer:
-            tb_writer.add_scalar('cnt/forward_pass', t1-t0, iteration)
-
-        t0 = time.time() 
-        # use copy of local render_ret to bledner, so that first auto_grad can be faster
-        local_render_rets_copy = pgc.make_copy_for_blending(main_rank_tasks, local_render_rets)
-        logger.debug("copy {} local render_rets for main rank task".format(len(local_render_rets_copy)))
+        # perform render 
+        local_render_rets = {} 
+        for t in render_tasks:
+            local_render_rets[(t.task_id, t.model_id)] = render4renderinfo(
+                viewpoint_camera=task_id2camera[t.task_id], 
+                GS=gaussians_group.get_model(t.model_id), 
+                info=merged_info[t.model_id],
+                pipe=pipe,
+                bg_color=background, 
+            )
+        # exchange render rets
+        extra_render_rets = scheduler._exchange_render_ret(local_render_rets, send_render_ret, recv_render_ret) 
+        local_render_rets_copy = local_render_rets
         images = {}
         for m in main_rank_tasks:
             relation_vector = train_rlt[task_id2cameraUid[m.task_id], :]
@@ -423,27 +611,18 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
                 task_id, model_id = k
                 ori_camera:Camera = task_id2camera[task_id]
                 idx = ori_camera.uid
-                # torchvision.utils.save_image(
-                #     local_render_rets[k]['render'], 
-                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
-                #     )
-                # torchvision.utils.save_image(
-                #     local_render_rets[k]['alpha'], 
-                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
-                # )
-
+                torchvision.utils.save_image(
+                    local_render_rets[k]['render'], 
+                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
+                    )
             for k in extra_render_rets:
                 task_id, model_id = k
                 ori_camera:Camera = task_id2camera[task_id]
                 idx = ori_camera.uid
-                # torchvision.utils.save_image(
-                #     extra_render_rets[k]['render'], 
-                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
-                # )
-                # torchvision.utils.save_image(
-                #     extra_render_rets[k]['alpha'], 
-                #     os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}_alpha'.format(idx, iteration, task_id, model_id) + ".png")
-                # )
+                torchvision.utils.save_image(
+                    extra_render_rets[k]['render'], 
+                    os.path.join(scene.save_img_path, '{0:05d}_{1:05d}_{2}_{3}'.format(idx, iteration, task_id, model_id) + ".png")
+                )
 
         if (len(images)>0) and RANK==0:
             k = list(images.keys())[0]
@@ -451,7 +630,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
             image = images[k]['render']
             image = torch.clamp(image, 0.0, 1.0)
             ori_camera:Camera = task_id2camera[task_id]
-            gt_image = ori_camera.original_image.to('cuda')
+            # gt_image = ori_camera.original_image.to('cuda')
             torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(ori_camera.uid, iteration) + ".png"))
             # torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))    
 
@@ -462,11 +641,9 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
         # Progress bar
         if dist.get_rank() == 0:
             progress_bar.update(batch_size)
-            # if iteration >= opt.iterations:
-            #     progress_bar.close()
                 
         step += 1
-        # torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
         t_iter_end = time.time()
 
     # after traversing dataset
@@ -488,6 +665,8 @@ def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, 
     mp_setup(rank, world_size, LOCAL_RANK, MASTER_ADDR, MASTER_PORT)
     dataset_args = train_args[1]
     tb_writer, logger = prepare_output_and_logger(dataset_args, train_args)
+    global GLOBAL_LOGGER
+    GLOBAL_LOGGER = logger
     with torch.no_grad():
         try:
             rendering(*train_args, (tb_writer, logger))
@@ -508,8 +687,10 @@ if __name__ == "__main__":
     parser.add_argument("--ply_iteration", type=int, default=-1)
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
-
+    parser.add_argument("--watch_split_plane", action="store_true")
     parser.add_argument("--bvh_depth", type=int, default=2, help='num_model_would be 2**bvh_depth')
+    parser.add_argument("--single_ply", type=str, default='', help='load all gs from a given .ply file')
+    parser.add_argument("--name", type=str, default='')
 
     args = parser.parse_args(sys.argv[1:])
 

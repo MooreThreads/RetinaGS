@@ -20,8 +20,9 @@ from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
 from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch, build_rotation
 from utils.workload_utils import NaiveWorkloadBalancer
+from gaussian_renderer.render_half_gs import RenderInfoFromGS, render4renderinfo
 
-import parallel_utils.schedulers.dynamic_space as psd 
+import parallel_utils.schedulers.optical_field_segment as pso
 import parallel_utils.grid_utils.core as pgc
 import parallel_utils.grid_utils.gaussian_grid as pgg
 import parallel_utils.grid_utils.utils as ppu
@@ -31,6 +32,7 @@ from scene.cameras import Camera, EmptyCamera, ViewMessage
 from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
 from scene.scene4bounded_gaussian import SceneV3
 from lpipsPyTorch import LPIPS
+from typing import List, Dict, Tuple
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -40,7 +42,8 @@ except ImportError:
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
-MAX_GS_CHANNEL = 59*3
+MAX_GS_CHANNEL = 59*3   
+# 59 is for 3 ranks of Spherical Harmonics, compute it manually or DO NOT ENABLE_REPARTITION
 SPLIT_ORDERS = [0, 1]
 ENABLE_REPARTITION = False
 REPARTITION_START_EPOCH = 10
@@ -355,7 +358,7 @@ def training_report(
         tb_writer, logger:logging.Logger, iteration:int, Ll1:torch.tensor, loss:torch.tensor, batch_size:int,
         l1_loss:callable, render_func:callable, modelId2rank:dict, local_func_blender:callable,
         elapsed: float, testing_iterations: list, validation_configs:dict, 
-        scene: SceneV3, gaussians_group: BoundedGaussianModelGroup, scheduler:psd.BasicSchedulerwithDynamicSpace):
+        scene: SceneV3, gaussians_group: BoundedGaussianModelGroup, scheduler:pso.BasicSchedulerwithDynamicSpace):
     RANK = dist.get_rank()
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
@@ -416,45 +419,46 @@ def gather_image_loss(main_rank_tasks:list, images:dict, task_id2camera:dict, op
         logger.debug('taskid_mainRank {}, loss {}, l1 {}'.format(k, loss, Ll1))
 
     return loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss
-
-
-def gather_reg_loss(local_render_rets:dict, task_id2camera:dict, local_model:BoundedGaussianModelGroup, opt, pipe, logger: logging.Logger):
-    t0 = time.time() 
-    if not opt.scales_reg_2d:
-        return None
-    if len(local_render_rets) <= 0:
-        logger.info('no render task, scale reg loss ia unavailable')
-        return None
-    
-    all_scales_reg = 0
-    for t_id_m_id in local_render_rets:
-        task_id, model_id = t_id_m_id
-        gaussians: BoundedGaussianModel = local_model.get_model(model_id)
-        rets: dict = local_render_rets[t_id_m_id]
-        viewpoint_cam:Camera = task_id2camera[task_id]
-
-        visibility_filter_2 = rets['visibility_filter']
-        Rs = build_rotation(gaussians._rotation)[visibility_filter_2]
-        scale = gaussians.get_scaling[visibility_filter_2]
-        L = (1/scale)[...,None]*Rs.permute((0,2,1))
-        w = gaussians.get_opacity[visibility_filter_2]
-        l = gaussians.get_xyz[visibility_filter_2].detach()-viewpoint_cam.camera_center
-        # l /= l.norm(dim=-1,keepdim=True)
-        z_loss = (w/((l.view(-1,1,3)@L).norm(dim=-1)+1e-8)).mean()
-        n = (l/l.norm(dim=-1,keepdim=True))[:,None]@Rs
-        xy_loss = (w*(scale-((n@scale[...,None])*n)[:,0]).norm(dim=1,keepdim=True)/l.norm(dim=-1,keepdim=True)).mean()
-        # print("loss before: ", loss.item())
-        # print("scales_reg: ", scales_reg.item())
-        scales_reg = z_loss+xy_loss
-        scales_reg *= opt.scales_reg_2d_lr * scales_reg
-        # scales_reg.backward()
-        if torch.any(torch.isnan(scales_reg)):
-            logger.warning("find nan scales_reg loss in task: {} model: {}".format(task_id, model_id))
-            return None
-        all_scales_reg += scales_reg
-
-    return all_scales_reg
    
+def gather_render_info(local_pool:Dict, extra_pool:Dict, local_model_ids:List[int], logger:logging.Logger):
+    id2infos = {int(_id):[] for _id in local_model_ids}
+    for p in [local_pool, extra_pool]:
+        for src_dst, info in p.items():
+            src, dst = src_dst
+            if dst not in id2infos:
+                continue
+            # make sure that render_info from the model itself occurs first
+            if src == dst:
+                id2infos[dst].insert(0, info)
+            else:
+                id2infos[dst].append(info)
+    ret = {}
+    for mid, info_list in id2infos.items():
+        ret[mid] = RenderInfoFromGS(
+            means3D = torch.cat([info.means3D for info in info_list], dim=0).contiguous(),
+            means2D = torch.cat([info.means2D for info in info_list], dim=0).contiguous(),
+            shs = torch.cat([info.shs for info in info_list], dim=0).contiguous(),
+            opacity = torch.cat([info.opacity for info in info_list], dim=0).contiguous(),
+            scales = torch.cat([info.scales for info in info_list], dim=0).contiguous(),
+            rotations = torch.cat([info.rotations for info in info_list], dim=0).contiguous()
+        )
+
+    return ret
+
+def gather_grad_of_extra_gs(extra_pool:dict, recv_extra_gs_tasks:List[pso.RecvExtraGS], logger:logging.Logger):
+    render_info_gard_dict = {}
+    for r in recv_extra_gs_tasks:
+        assert isinstance(r, pso.RecvExtraGS)
+        info:RenderInfoFromGS = extra_pool[(r.src_model_id, r.dst_model_id)]
+        grads = []
+        for e_id in range(len(info)):
+            if info[e_id].grad is not None:
+                grads.append(info[e_id].grad)
+            else:
+                grads.append(torch.zeros_like(info[e_id]))
+                logger.info('tag {} element {} of shape {}, find None gard'.format((r.src_model_id, r.dst_model_id), e_id, info[e_id].shape))
+        render_info_gard_dict[(r.src_model_id, r.dst_model_id)] = RenderInfoFromGS(*grads)
+    return render_info_gard_dict
 
 def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, checkpoint_iterations, debug_from, LOGGERS):
     # training-constant states
@@ -482,19 +486,24 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
     bg_color = [1, 1, 1] if dataset_args.white_background else [0, 0, 0]
     background = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
     final_background = torch.tensor(bg_color, dtype=torch.float32, device="cuda") if not opt.random_background else None 
+    # handles: 
+    zipper_extra_gs, unzipper_grad_extra_gs, space4render_info, unzipper_extra_gs = pgg.build_zip_unzip_for_render_info(dataset_args.sh_degree)
+    space4extra_gs = lambda x: space4render_info(length=x.length)
 
-    task_parser = psd.TaskParser(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
-    space_task_parser = psd.SpaceTaskMatcher(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
-    scheduler = psd.BasicSchedulerwithDynamicSpace(
-        task_parser=task_parser, logger=logger, tb_writer=tb_writer,
-        func_pack_up=BoundedGaussianModelGroup.pack_up_render_ret,
-        func_grad_pack_up=pgc.build_check_and_pack_up_grad(logger=logger),
-        func_unpack_up=BoundedGaussianModelGroup.unpack_up_render_ret,
-        func_grad_unpack_up=BoundedGaussianModelGroup.unpack_up_grad_of_render_ret,
-        func_space=pgc.func_space_for_render,
-        func_grad_space=pgc.func_space_for_grad_of_render,
-        batch_isend_irecv_version=0 # use nccl batched_isend_irecv 
+    task_parser = pso.Parser4OpticalFieldSegment(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
+    space_task_parser = pso.SpaceTaskMatcher(PROCESS_WORLD_SIZE=WORLD_SIZE, GLOBAL_RANK=RANK, logger=logger)
+    scheduler = pso.BasicScheduler4OpticalFieldSegment(
+        logger=logger, tb_writer=tb_writer, batch_isend_irecv_version=0,
+        zip_extra_gs=zipper_extra_gs, unzip_extra_gs=unzipper_extra_gs, space_extra_gs=space4extra_gs,
+        zip_grad_extra_gs=zipper_extra_gs, unzip_grad_extra_gs=unzipper_grad_extra_gs, space_grad_extra_gs=space4extra_gs,
+        zip_render_ret=BoundedGaussianModelGroup.pack_up_render_ret, 
+        unzip_render_ret=BoundedGaussianModelGroup.unpack_up_render_ret, 
+        space_render_ret=pgc.func_space_for_render,
+        zip_grad_render_ret=pgc.build_check_and_pack_up_grad(logger=logger),
+        unzip_grad_render_ret=BoundedGaussianModelGroup.unpack_up_grad_of_render_ret,
+        space_grad_render_ret=pgc.func_space_for_grad_of_render
     )
+
     local_func_blender = pgg.build_func_blender(final_background=final_background, logger=logger)
 
     #  create partition of space or load it 
@@ -601,15 +610,9 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
         train_loader = DataLoader(grouped_train_dataset, 
                                   batch_size=1, num_workers=2, prefetch_factor=2, drop_last=True,
                                   shuffle=False, collate_fn=SceneV3.get_batch, pin_memory=True, pin_memory_device='cuda')
-        t_iter_end = time.time()
-
+     
         gaussians_group.update_learning_rate(iteration)  #  - ply_iteration
         for ids_data in train_loader:
-            t_data = time.time()
-            if tb_writer:
-                tb_writer.add_scalar('cnt/loader_iter', t_data-t_iter_end, iteration) 
-            logger.info('loader iter time {}'.format(t_data-t_iter_end))
-
             ids, data = ids_data[0] # [(tuple(int), tuple(camera))]
             batch_size = len(data)  # list of Camera/None, batchsize can be dynamic in the future    
             assert batch_size > 0, "get empty group"             
@@ -621,11 +624,7 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             logger.info('start of iteration {}'.format(iteration))
             if iteration > 20:
                 logger.setLevel(logging.INFO)
-            # if iteration % 16 == 0 and iteration > 0:
-            #     logger.info(gaussians_group.get_info())
-
-            # rank 0 samples cameras and broadcast the data 
-            t0 = time.time()
+       
             cameraUid_taskId_mainRank = torch.zeros((batch_size, 3), dtype=torch.int, device='cuda') 
             packages = torch.zeros((batch_size, *Camera.package_shape()), dtype=torch.float32, device='cuda') 
             data_gpu = [_cmr.to_device('cuda') for _cmr in data]
@@ -641,40 +640,38 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             dist.broadcast(packages, src=0, async_op=False, group=None)
             logger.info('broadcast packages, iteration {}'.format(iteration))
             dist.barrier()   
-            t1 = time.time()
-            broadcast_task_cost += (t1-t0)
-            if tb_writer:
-                tb_writer.add_scalar('cnt/broadcast_sync', t1-t0, iteration) 
             # end of broadcast and sync, unpack training-data
-            t0 = time.time()
+         
             cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()
             view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)
-            t1 = time.time()
-            data_cost += (t1-t0)
-            if tb_writer:
-                tb_writer.add_scalar('cnt/prepare_data', t1-t0, iteration) 
-
-            # logger.info(task_id2camera)
             mini_message = ' '.join(['(id={}, H={}, W={})'.format(e.id, e.image_height, e.image_width) for e in view_messages])
             _uids = cameraUid_taskId_mainRank[:,0].to(torch.long)
             logger.info("rank {} get task {}, relation \n{}".format(RANK, mini_message, train_rlt[_uids, :]))
-            # default debug_from is -1, never debug
-            if debug_from in range(iteration, iteration + batch_size):
-                pipe.debug = True
 
-            t0 = time.time()    
-            # render contents and exchange them between ranks
-            main_rank_tasks, local_render_rets, extra_render_rets = scheduler.forward_pass(
-                func_render=render_func,
-                modelId2rank=model_id2rank,
-                _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
-                _relation_matrix=train_rlt[_uids, :],
-                views=view_messages)
-            t1 = time.time()
-            if tb_writer:
-                tb_writer.add_scalar('cnt/forward_pass', t1-t0, iteration)
-
-            t0 = time.time() 
+            # find extra gs(render_info) that are necesssary to exchange, and exchange
+            local_render_info_pool, GLOBAL_SEND_GS_AMOUNT_CPU = pgg.naive_render_info_gather(
+                groups=gaussians_group, modelId2Boxes=model_id2box, scene_3d_grid=scene_3d_grid, logger=logger
+            )
+            send_extra_gs, recv_extra_gs = task_parser.parser_extra_gs_task(GLOBAL_SEND_GS_AMOUNT_CPU, modelId2rank=model_id2rank)
+            extra_render_info_pool = scheduler._exchange_extra_gs(local_render_info_pool, send_extra_gs, recv_extra_gs)
+            # merge render_info
+            merged_info = gather_render_info(local_render_info_pool, extra_render_info_pool, local_model_ids, logger)
+            # render_task, send_ret_task, recv_ret_task, main_rank_task
+            send_render_ret, recv_render_ret, render_tasks, main_rank_tasks = task_parser.parse_task_tensor(
+                model_id2rank, cameraUid_taskId_mainRank[:, [1,2]], train_rlt[_uids, :], view_messages
+            )
+            # perform render 
+            local_render_rets = {} 
+            for t in render_tasks:
+                local_render_rets[(t.task_id, t.model_id)] = render4renderinfo(
+                    viewpoint_camera=task_id2camera[t.task_id], 
+                    GS=gaussians_group.get_model(t.model_id), 
+                    info=merged_info[t.model_id],
+                    pipe=pipe,
+                    bg_color=background, 
+                )
+            # exchange render rets
+            extra_render_rets = scheduler._exchange_render_ret(local_render_rets, send_render_ret, recv_render_ret) 
             # use copy of local render_ret to bledner, so that first auto_grad can be faster
             local_render_rets_copy = pgc.make_copy_for_blending(main_rank_tasks, local_render_rets)
             logger.debug("copy {} local render_rets for main rank task".format(len(local_render_rets_copy)))
@@ -682,62 +679,37 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             for m in main_rank_tasks:
                 relation_vector = train_rlt[task_id2cameraUid[m.task_id], :]
                 images[(m.task_id, m.rank)] = local_func_blender(local_render_rets_copy, extra_render_rets, m, relation_vector)
-            t1 = time.time()
-            if tb_writer:
-                tb_writer.add_scalar('cnt/blender', t1-t0, iteration)
-
             # grad from loss to local/extra render_results  
             loss_main_rank, Ll1_main_rank = torch.tensor(0.0, device='cuda'), torch.tensor(0.0, device='cuda')
             if len(main_rank_tasks) > 0: 
                 loss_main_rank, Ll1_main_rank, loss_dict, _t_gather, _t_loss = gather_image_loss(
                     main_rank_tasks=main_rank_tasks, images=images, task_id2camera=task_id2camera, opt=opt, pipe=pipe, logger=logger
                 )
-                t0 = time.time()
                 loss_main_rank.backward(retain_graph=True)  
-                t1 = time.time()
-                _t_image_grad = t1 -t0 
                 logger.debug('{} main_rank image rets'.format(len(images))) 
             else:
-                _t_gather, _t_loss, _t_image_grad = 0, 0, 0
                 logger.debug('no main_rank image ret, also no need to backward')    
-            if tb_writer:
-                tb_writer.add_scalar('cnt/gather_tensor', _t_gather, iteration)
-                tb_writer.add_scalar('cnt/gather_loss', _t_loss, iteration)
-                tb_writer.add_scalar('cnt/grad_image', _t_image_grad, iteration)
-
             # exchange gradient symmetrically with exchange render-contents
-            # gradients shall be registered to the tensors in extra_render_rets
-            t0 = time.time()
-            grad_from_other_rank = scheduler.backward_pass(extra_render_rets)
-            t1 = time.time()
-            if tb_writer:
-                tb_writer.add_scalar('cnt/backward_pass', t1-t0, iteration)
+            # gradients shall be registered to the tensors in extra_render_rets, build_check_and_pack_up_grad would precess them
 
-            # grad from local/extra render_results to GS.modelParameters
-            t0 = time.time()
-            send_tasks = scheduler.saved_for_backward_dict['send_tasks']
-            send_local_tensor, extra_gard, main_local_tensor, main_grad = pgc.gather_tensor_grad_of_render_result(send_tasks, local_render_rets, grad_from_other_rank, local_render_rets_copy)
-            t1 = time.time()
-            if tb_writer:
-                tb_writer.add_scalar('cnt/gather_img_grad', t1-t0, iteration) 
-            
-            t0 = time.time()
+            extra_grad_render_rets = scheduler._exchange_gard_render_ret(extra_render_rets, send_render_ret, recv_render_ret)
+
+            # grad from local/extra render_results to extraRenderInfo and local GS model
+            send_local_tensor, extra_gard, main_local_tensor, main_grad = pgc.gather_tensor_grad_of_render_result(send_render_ret, local_render_rets, extra_grad_render_rets, local_render_rets_copy)
             logger.debug('seconda autograd in iteration {}, for {} main local grad, {} extra grad'.format(iteration, len(main_grad), len(extra_gard)))
             if (len(main_grad) + len(extra_gard)) > 0:
-                torch.autograd.backward(main_local_tensor + send_local_tensor, main_grad + extra_gard) 
+                torch.autograd.backward(main_local_tensor + send_local_tensor, main_grad + extra_gard, retain_graph=True) 
             else:
                 logger.warning('iteration {}, find no main grad nor extra grad'.format(iteration)) 
 
-            scaling_reg:torch.Tensor = gather_reg_loss(local_render_rets, task_id2camera, gaussians_group, opt, pipe, logger)
-            if scaling_reg is not None:
-                if tb_writer:
-                     tb_writer.add_scalar('train_loss_patches/scaling_reg', scaling_reg.item(), iteration)
-                scaling_reg.backward()
-
-            t1 = time.time()
-            accum_model_grad += (t1-t0)
-            if tb_writer:
-                tb_writer.add_scalar('cnt/accum_model_grad', t1-t0, iteration) 
+            # extra grad of local render_info to local GS model, just ignore the extra max_radii, it would make thing even more complex
+            grad_extra_gs = gather_grad_of_extra_gs(extra_render_info_pool, recv_extra_gs, logger)
+            extra_grad_of_local_gs = scheduler._exchange_grad_extra_gs(grad_extra_gs, send_extra_gs, recv_extra_gs)
+            local_gs_tensor_list, extra_grad_local_gs_list = pgg.gather_tensor_and_grad_of_render_info(send_extra_gs, local_render_info_pool, extra_grad_of_local_gs)
+            if len(local_gs_tensor_list) > 0:
+                torch.autograd.backward(local_gs_tensor_list, extra_grad_local_gs_list) 
+            else:
+                logger.info('iteration {}, find no extra grad for render info'.format(iteration)) 
 
             iter_end.record()
             torch.cuda.synchronize()
@@ -760,10 +732,6 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     iter_time, testing_iterations, validation_configs, 
                     scene, gaussians_group, scheduler)
                 
-                total_num_rendered = sum([local_render_rets[k]['num_rendered'] for k in local_render_rets])
-                if tb_writer:
-                    tb_writer.add_scalar('cnt/num_rendered', total_num_rendered, iteration)
-
                 pgc.update_densification_stat(iteration, opt, gaussians_group, local_render_rets, tb_writer, logger)
                 pgc.densification(iteration, batch_size, 
                                   (iteration-last_prune_iteration)<SKIP_PRUNE_AFTER_RESET, 
@@ -774,26 +742,11 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
 
                 # Optimizer
                 if True: # iteration < opt.iterations:
-                    t0 = time.time()
                     for _gau_name in gaussians_group.all_gaussians:
                         _gaussians = gaussians_group.all_gaussians[_gau_name]
                         _gaussians.optimizer.step()
                         _gaussians.optimizer.zero_grad(set_to_none = True)
-                    t1 = time.time()
-                    opti_step_time += (t1-t0)
-
-                if iteration in checkpoint_iterations:
-                    print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                    for i in range(len(gaussians_group.all_gaussians)):
-                        model_id = gaussians_group.model_id_list[i]
-                        gaussians = gaussians_group.all_gaussians[i]
-                        path = os.path.join(scene.model_path, str(iteration), 'chkpnt_{}.pth'.format(model_id))
-                        torch.save((gaussians.capture(), iteration), path)
  
-                # save for every SAVE_INTERVAL_ITER
-                if is_interval_in_batch(iteration, batch_size, SAVE_INTERVAL_ITER, low_limit=100 + ply_iteration):
-                    save_GS(iteration=iteration, model_path=scene.model_path, gaussians_group=gaussians_group, path2node=path2bvh_nodes)
-
             # logger.info(f'end of {iteration}')
             iteration += batch_size
             step += 1
@@ -810,16 +763,15 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
             if (i_epoch % EVAL_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):  
                 torch.cuda.empty_cache()  
                 eval(
-                    tb_writer, logger, iteration, Ll1_main_rank, loss_main_rank, batch_size,
-                    l1_loss, render_func, model_id2rank, local_func_blender,
-                    iter_time, testing_iterations, validation_configs, 
-                    scene, gaussians_group, scheduler)
+                    tb_writer, logger, iteration, pipe,
+                    scene_3d_grid, model_id2box, model_id2rank,
+                    l1_loss, local_func_blender, background,
+                    validation_configs, gaussians_group, scheduler, task_parser)
                 torch.cuda.empty_cache()
-            
             if ENABLE_REPARTITION and (i_epoch % REPARTITION_INTERVAL_EPOCH == 0) and (REPARTITION_START_EPOCH<= i_epoch <= REPARTITION_END_EPOCH):
                 t0 = time.time()
                 logger.info('before resplit\n' + gaussians_group.get_info())
-                new_path2bvh_nodes, new_sorted_leaf_nodes, new_tree_str, dst_model2box, dst_model2rank, dst_local_model_ids, dst_id2msgs = psd.eval_load_and_divide_grid_dist(
+                new_path2bvh_nodes, new_sorted_leaf_nodes, new_tree_str, dst_model2box, dst_model2rank, dst_local_model_ids, dst_id2msgs = pso.eval_load_and_divide_grid_dist(
                     src_gaussians_group=gaussians_group, scr_path2bvh_nodes=path2bvh_nodes,
                     src_model2box=model_id2box, src_model2rank=model_id2rank, src_local_model_ids=local_model_ids,
                     scene_3d_grid=scene_3d_grid, space_task_parser=space_task_parser,
@@ -861,26 +813,31 @@ def training(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, c
                     tb_writer.add_scalar('resplit/total', t1-t0, iteration) 
                     
     # after all iterations
-    logger.info('all time cost in broadcast_task {}'.format(broadcast_task_cost))
-    logger.info('all time cost in accum_grad {}'.format(accum_model_grad))
-    logger.info('all time cost in optimizer step {}'.format(opti_step_time))
-    logger.info('all time cost in prepare data {}'.format(data_cost))
-
-    final_metric = torch.tensor(
-        [broadcast_task_cost, accum_model_grad, opti_step_time, data_cost, scheduler.send_recv_forward_cost, scheduler.send_recv_backward_cost],
-        dtype=torch.float32, device='cuda')
-    dist.all_reduce(final_metric, op=dist.ReduceOp.SUM, group=None, async_op=False)
-    logger.info('final_metric {}'.format(final_metric))
+   
 
 def eval(
-        tb_writer, logger:logging.Logger, iteration:int, Ll1:torch.tensor, loss:torch.tensor, batch_size:int,
-        l1_loss:callable, render_func:callable, modelId2rank:dict, local_func_blender:callable,
-        elapsed: float, testing_iterations: list, validation_configs:dict, 
-        scene: SceneV3, gaussians_group: BoundedGaussianModelGroup, scheduler:psd.BasicSchedulerwithDynamicSpace
+        tb_writer, logger:logging.Logger, iteration:int, pipe,
+        scene_3d_grid:pgc.Grid3DSpace, model_id2box, modelId2rank:dict,
+        l1_loss:callable, local_func_blender:callable, background, 
+        validation_configs:dict, gaussians_group: BoundedGaussianModelGroup, 
+        scheduler:pso.BasicScheduler4OpticalFieldSegment, task_parser:pso.Parser4OpticalFieldSegment
         ):
     # Report test and samples of training set
     torch.cuda.empty_cache()
-    scheduler.record_info()
+    # in eval just gather extra render info fo once
+
+    # burning really starts to think cache the featue is a stupid idea
+    # one can easily forget to clean cache !!!!
+    gaussians_group.clean_cached_features()
+    logger.info('exchange only once is enough for eval')
+    local_render_info_pool, GLOBAL_SEND_GS_AMOUNT_CPU = pgg.naive_render_info_gather(
+        groups=gaussians_group, modelId2Boxes=model_id2box, scene_3d_grid=scene_3d_grid, logger=logger
+    )
+    send_extra_gs, recv_extra_gs = task_parser.parser_extra_gs_task(GLOBAL_SEND_GS_AMOUNT_CPU, modelId2rank=modelId2rank)
+    extra_render_info_pool = scheduler._exchange_extra_gs(local_render_info_pool, send_extra_gs, recv_extra_gs)
+    # merge render_info
+    merged_info = gather_render_info(local_render_info_pool, extra_render_info_pool, gaussians_group.model_id_list, logger)
+           
     # all rank load the same database, thus the shapes can meet 
     for config in validation_configs:
         if config['cameras'] and len(config['cameras']) > 0:
@@ -891,39 +848,45 @@ def eval(
                 eval_loader = config['cameras']
             else:
                 eval_loader = DataLoader(config['cameras'], 
-                                  batch_size=1, num_workers=2, prefetch_factor=2, drop_last=False,
+                                  batch_size=1, num_workers=32, prefetch_factor=2, drop_last=False,
                                   shuffle=False, collate_fn=SceneV3.get_batch, pin_memory=True, pin_memory_device='cuda')  
             for idx, data in enumerate(eval_loader):
-            # for idx in range(len(config['cameras'])):
-                # viewpoint = config['cameras'][idx]
-                viewpoint = data[0]
                 cameraUid_taskId_mainRank = torch.zeros((1, 3), dtype=torch.int, device='cuda') 
                 packages = torch.zeros((1, 16, 4), dtype=torch.float32, device='cuda') 
+                data_gpu = [_cmr.to_device('cuda') for _cmr in data]
                 if RANK == 0:   
-                    viewpoint_cams = [viewpoint]
-                    for i, camera in enumerate(viewpoint_cams):
+                    for i, camera in enumerate(data_gpu):
                         cameraUid_taskId_mainRank[i, 0] = camera.uid
                         cameraUid_taskId_mainRank[i, 1] = i
                         cameraUid_taskId_mainRank[i, 2] = 0
                         packages[i] = camera.pack_up(device='cuda')
-                else:
-                    viewpoint_cams = [None]
-
                 dist.broadcast(cameraUid_taskId_mainRank, src=0, async_op=False)
                 dist.broadcast(packages, src=0, async_op=False)
                 dist.barrier() 
                 logger.info("validation: iteration {}".format(idx))  
-                cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()    
-                view_messages = [ViewMessage(packages[0], id=idx)]  
-                task_id2camera = {int(_id):e for _id, e in zip(cameraUid_taskId_mainRank[:,1], viewpoint_cams)}
-                task_id2cameraUid = {int(row[1]): int(row[0]) for row in cameraUid_taskId_mainRank}   
-        
-                main_rank_tasks, local_render_rets, extra_render_rets = scheduler.forward_pass(
-                    func_render=render_func,
-                    modelId2rank=modelId2rank,
-                    _task_main_rank=cameraUid_taskId_mainRank[:, [1,2]],
-                    _relation_matrix=config['rlt'][cameraUid_taskId_mainRank[:,0].long(), :],
-                    views=view_messages)
+                cameraUid_taskId_mainRank = cameraUid_taskId_mainRank.cpu()  
+                view_messages, task_id2cameraUid, uid2camera, task_id2camera = unpack_data(cameraUid_taskId_mainRank, packages, data_gpu, logger)  
+               
+                send_render_ret, recv_render_ret, render_tasks, main_rank_tasks = task_parser.parse_task_tensor(
+                    modelId2rank, cameraUid_taskId_mainRank[:, [1,2]], config['rlt'][cameraUid_taskId_mainRank[:,0].long(), :], view_messages
+                )
+                # perform render 
+                local_render_rets = {} 
+                for t in render_tasks:
+                    local_render_rets[(t.task_id, t.model_id)] = render4renderinfo(
+                        viewpoint_camera=task_id2camera[t.task_id], 
+                        GS=gaussians_group.get_model(t.model_id), 
+                        info=merged_info[t.model_id],
+                        pipe=pipe,
+                        bg_color=background, 
+                    )
+
+                # exchange render rets
+                extra_render_rets = scheduler._exchange_render_ret(local_render_rets, send_render_ret, recv_render_ret) 
+                # use copy of local render_ret to bledner, so that first auto_grad can be faster
+                local_render_rets_copy = pgc.make_copy_for_blending(main_rank_tasks, local_render_rets)
+                logger.debug("copy {} local render_rets for main rank task".format(len(local_render_rets_copy)))
+             
                 images = {}
                 for m in main_rank_tasks:
                     relation_vector = config['rlt'][task_id2cameraUid[m.task_id], :]
@@ -935,15 +898,15 @@ def eval(
                     task_id, _ = k
                     image = images[k]['render']
                     image = torch.clamp(image, 0.0, 1.0)
-                    ori_camera:Camera = viewpoint # task_id2camera[task_id]
+                    ori_camera:Camera = task_id2camera[task_id]
                     gt_image = ori_camera.original_image.to('cuda')
 
                     # torchvision.utils.save_image(image, os.path.join(scene.save_img_path, '{0:05d}_{1:05d}'.format(idx, iteration) + ".png"))
                     # torchvision.utils.save_image(gt_image, os.path.join(scene.save_gt_path, '{0:05d}'.format(idx) + ".png"))
 
                     if tb_writer and (idx < 1000) and (idx % 10==0):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
-                        tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                        tb_writer.add_images(config['name'] + "_view_{}/render".format(ori_camera.image_name), image[None], global_step=iteration)
+                        tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(ori_camera.image_name), gt_image[None], global_step=iteration)
                     l1_test += l1_loss(image, gt_image).mean().item()
                     psnr_test += psnr(image, gt_image).mean().item()
 

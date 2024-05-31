@@ -105,12 +105,13 @@ class TaskParser:
         return send_tasks, recv_tasks, render_tasks, main_rank_tasks
 
 
+# send model and optimizer momentum 
 class SendBoxinGrid(NamedTuple):
     src_model_id: int
     dst_model_id: int
     src_rank: int
     dst_rank: int
-    grid_range: BoxinGrid3D
+    grid_range: BoxinGrid3D # box of dst_model
 
 
 class RecvBoxinGrid(NamedTuple):
@@ -662,6 +663,11 @@ def eval_load_and_divide_grid_dist(
 
         dst_model2box, dst_model2rank, dst_local_model_ids = pgg.init_GS_model_division_dist(sorted_leaf_nodes, logger)
        
+        # this is not a pefect match but it is enough
+        # actually I know how to improve it but it is really not so simple to adjust the optical field segment
+        # the point is that exchanging large amount of parameters can easily cause OOM
+        # if you insist your requiremnet, implement all related details yourself
+        # burning is lazy 
         send_gs_tasks, recv_gs_tasks = space_task_parser.match(src_model2box, src_model2rank, dst_model2box, dst_model2rank)
         # pack up src model and release some memory
         src_id2GS_package = {}

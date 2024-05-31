@@ -1,4 +1,4 @@
-DATA_PATH=/jfs/shengyi.chen/HT/Data/Mill_19/OpenDataLab___Mill_19/colmap_norm/Mill_19/building-pixsfm
+DATA_PATH=/jfs/shengyi.chen/HT/Data/MatrixCity/block_all_aerial_unit-1m
 
 mkdir $DATA_PATH/gt_pose
 colmap feature_extractor \

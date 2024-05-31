@@ -80,13 +80,14 @@ def readCamerasFromTransforms(transformsfile):
             image_qvec = [q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]]
             
             short_name = os.path.basename(cam_name)
+            block_name = os.path.basename(os.path.dirname(cam_name))
 
             # Image list with two lines of data per image:
             #   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME
             #   POINTS2D[] as (X, Y, POINT3D_ID)
             img_info = Image(id=i, camera_id=i, 
                   qvec=image_qvec, tvec=image_tvec, 
-                  name=short_name, 
+                  name=block_name + '_' + short_name, 
                   xys=[], point3D_ids=[])
       
             # 2 PINHOLE 3072 2304 2560.56 2560.56 1536 1152

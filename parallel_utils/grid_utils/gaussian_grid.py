@@ -12,11 +12,15 @@ from utils.datasets import DatasetRepeater, GroupedItems, CameraListDataset
 import parallel_utils.grid_utils.utils as ppu
 import parallel_utils.grid_utils.core as pgc
 from parallel_utils.schedulers.core import SendTask, RecvTask, RenderTask, MainRankTask
+from parallel_utils.schedulers.core import SendExtraGS, RecvExtraGS
 import parallel_utils.schedulers.dynamic_space as psd 
 
 from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera, ViewMessage
 from scene.scene4bounded_gaussian import SceneV3
+
+from gaussian_renderer.render_half_gs import gradNormHelpFunction, RenderInfoFromGS
+from typing import List, Dict, Tuple
 
 """
 path2nodes:dict of nodes in BVH tree where key is str(01) path
@@ -223,7 +227,7 @@ def init_GS_model_division(all_leaf_node:list, logger:logging.Logger):
 
     return model2box, model2rank, local_model_ids
 
-def init_GS_model_division_dist(all_leaf_node:list, logger:logging.Logger):
+def init_GS_model_division_dist(all_leaf_node:List[ppu.BvhTreeNodeon3DGrid], logger:logging.Logger):
     # all_leaf_node: list of BvhTreeNodeon3DGrid
     RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
     if RANK == 0:
@@ -443,3 +447,175 @@ def densification(iteration, batch_size, opt, dataset_arg, scene:SceneV3, gaussi
                 _gaussians.reset_opacity()
             logger.info('rank {} has reset opacity at iteration {}'.format(dist.get_rank(), iteration))
 
+
+def render_info_from_GS(src_id:int, gaussians: BoundedGaussianModel, dst_models:List[int], modelId2Boxes: Dict[int, ppu.BoxinGrid3D], scene_3d_grid:ppu.Grid3DSpace, logger:logging.Logger):
+    '''
+    we assume the BoundedGS maintain GS locates in (low, high]
+    and we also assume it would behave as the optical field in (low, high]
+    '''
+    main_info = RenderInfoFromGS(
+        means3D=gaussians.get_xyz,
+        means2D=gradNormHelpFunction(gaussians._means2D_meta),
+        shs=gaussians.get_features,
+        opacity=gaussians.get_opacity,
+        scales=gaussians.get_scaling,
+        rotations=gaussians.get_rotation
+    )
+
+    # find the small amount GS that go beyond optical field
+    scene_voxel_size = torch.tensor(scene_3d_grid.voxel_size, device='cuda')
+    scene_range_low = torch.tensor(scene_3d_grid.range_low, device='cuda')
+    range_low_gpu = (gaussians.range_low * scene_voxel_size + scene_range_low).view(-1)
+    range_up_gpu = (gaussians.range_up * scene_voxel_size + scene_range_low).view(-1)
+
+    max_radii, _idx = torch.max(main_info.scales, dim=-1, keepdim=True)
+    max_radii = (max_radii*3).clamp(min=0)
+
+    max_xyz = main_info.means3D + max_radii
+    min_xyz = main_info.means3D - max_radii
+    flag1 = max_xyz >= range_up_gpu # beyond upper bound
+    flag2 = min_xyz <= range_low_gpu # beyond lower bound
+    _flag = torch.logical_or(flag1, flag2)
+    flag = torch.any(_flag, dim=-1, keepdim=False)
+
+    logger.info('candidate gs for exchange: {}'.format(flag.sum()))
+    candidate = RenderInfoFromGS(
+        means3D=main_info.means3D[flag].contiguous(),
+        means2D=main_info.means2D[flag].contiguous(),
+        shs=main_info.shs[flag].contiguous(),
+        opacity=main_info.opacity[flag].contiguous(),
+        scales=main_info.scales[flag].contiguous(),
+        rotations=main_info.rotations[flag].contiguous()
+    )
+    subset_max_xyz = max_xyz[flag].contiguous()
+    subset_min_xyz = min_xyz[flag].contiguous()
+    # match for dst models
+    ret = {}
+    ret[(src_id, src_id)] = main_info
+    for dst_model in dst_models:
+        box = modelId2Boxes[dst_model]
+        range_low_gpu = (torch.tensor(box.range_low, device='cuda') * scene_voxel_size + scene_range_low).view(-1)
+        range_up_gpu = (torch.tensor(box.range_up, device='cuda') * scene_voxel_size + scene_range_low).view(-1)
+    
+        flag1 = subset_max_xyz >= range_low_gpu
+        flag2 = subset_min_xyz <= range_up_gpu
+        _flag = torch.logical_and(flag1, flag2)
+        flag = torch.all(_flag, dim=-1, keepdim=False)
+
+        ret[(src_id, dst_model)] = RenderInfoFromGS(
+            means3D=candidate.means3D[flag].contiguous(),
+            means2D=candidate.means2D[flag].contiguous(),
+            shs=candidate.shs[flag].contiguous(),
+            opacity=candidate.opacity[flag].contiguous(),
+            scales=candidate.scales[flag].contiguous(),
+            rotations=candidate.rotations[flag].contiguous()
+        )
+
+    return ret    
+
+def naive_render_info_gather(groups:BoundedGaussianModelGroup, modelId2Boxes: Dict[int, ppu.BoxinGrid3D], scene_3d_grid:ppu.Grid3DSpace, logger:logging.Logger):
+    NUM_MODELS  = len(modelId2Boxes)
+    # just match a optical field segment with all others
+    render_info_pool:Dict[Tuple[int, int], RenderInfoFromGS] = {}
+    for str_id in groups.all_gaussians:
+        src_model = groups.all_gaussians[str_id]
+        src_id = int(str_id)
+        dst_models = [_id for _id in range(NUM_MODELS) if _id != src_id]
+        infos = render_info_from_GS(
+            src_id=src_id, 
+            gaussians=src_model, 
+            dst_models=dst_models, 
+            modelId2Boxes=modelId2Boxes,
+            scene_3d_grid=scene_3d_grid,
+            logger=logger)
+
+        pool_size = len(render_info_pool)
+        render_info_pool.update(infos)
+        assert len(render_info_pool) - pool_size == len(infos) 
+
+    # comm the shape of render_info in all ranks
+    GLOBAL_SEND_GS_AMOUNT_CPU = torch.zeros((NUM_MODELS, NUM_MODELS), dtype=torch.int, device='cpu')
+    for src_dst in render_info_pool:
+        src_id, dst_id = src_dst
+        amount = render_info_pool[src_dst].means3D.shape[0]
+        GLOBAL_SEND_GS_AMOUNT_CPU[src_id, dst_id] = amount
+
+    logger.info('local render_info amount:\n {}'.format(GLOBAL_SEND_GS_AMOUNT_CPU))   
+    GLOBAL_SEND_GS_AMOUNT = GLOBAL_SEND_GS_AMOUNT_CPU.cuda()
+    dist.all_reduce(GLOBAL_SEND_GS_AMOUNT, op=dist.ReduceOp.SUM, group=None, async_op=False)
+    GLOBAL_SEND_GS_AMOUNT_CPU = GLOBAL_SEND_GS_AMOUNT.cpu()
+    logger.info('global render_info amount:\n {}'.format(GLOBAL_SEND_GS_AMOUNT_CPU))   
+
+    return render_info_pool, GLOBAL_SEND_GS_AMOUNT_CPU
+
+def build_zip_unzip_for_render_info(sh_degree:int):
+    assert sh_degree <= 3, 'gs kernel accept 3 degree at most'
+    def zipper(info:RenderInfoFromGS):
+        c_mean3d, c_mean2d = 3, 3
+        c_sh_rest = (sh_degree + 1) ** 2 - 1
+        c_sh_dc = 1
+        c_sh = (c_sh_rest + c_sh_dc)*3
+        c_opacity, c_scales, c_rotations = 1, 3, 4
+
+        ret = torch.cat(
+            [info.means3D, info.means2D, info.opacity, info.scales, info.rotations, info.shs.view(-1, c_sh)],
+            dim=-1).to(dtype=torch.float32).contiguous()
+        return ret
+        
+    def unzipper(info:torch.Tensor):
+        c_mean3d, c_mean2d = 3, 3
+        c_sh_rest = (sh_degree + 1) ** 2 - 1
+        c_sh_dc = 1
+        c_sh = (c_sh_rest + c_sh_dc)*3
+        c_opacity, c_scales, c_rotations = 1, 3, 4
+        all_channel = (c_mean3d + c_mean2d + c_opacity + c_scales + c_rotations + c_sh)
+        assert info.shape[1] == all_channel
+        return RenderInfoFromGS(
+            means3D=info[:, 0:3].contiguous(),
+            means2D=info[:, 3:6].contiguous(),
+            opacity=info[:, 6:7].contiguous(),
+            scales=info[:, 7:10].contiguous(),
+            rotations=info[:, 10:14].contiguous(),
+            shs=info[:, 14:].reshape(-1, c_sh//3, 3).contiguous()
+        )
+    
+    def unzipper_requires_grad(info:torch.Tensor):
+        c_mean3d, c_mean2d = 3, 3
+        c_sh_rest = (sh_degree + 1) ** 2 - 1
+        c_sh_dc = 1
+        c_sh = (c_sh_rest + c_sh_dc)*3
+        c_opacity, c_scales, c_rotations = 1, 3, 4
+        all_channel = (c_mean3d + c_mean2d + c_opacity + c_scales + c_rotations + c_sh)
+        assert info.shape[1] == all_channel
+        return RenderInfoFromGS(
+            means3D=info[:, 0:3].clone().detach().requires_grad_(True).contiguous(),
+            means2D=info[:, 3:6].clone().detach().requires_grad_(True).contiguous(),
+            opacity=info[:, 6:7].clone().detach().requires_grad_(True).contiguous(),
+            scales=info[:, 7:10].clone().detach().requires_grad_(True).contiguous(),
+            rotations=info[:, 10:14].clone().detach().requires_grad_(True).contiguous(),
+            shs=info[:, 14:].reshape(-1, c_sh//3, 3).clone().detach().requires_grad_(True).contiguous()
+        )
+    
+
+    def space4render_info(length:int, device='cuda', only_shape=False):
+        c_mean3d, c_mean2d = 3, 3
+        c_sh_rest = (sh_degree + 1) ** 2 - 1
+        c_sh_dc = 1
+        c_sh = (c_sh_rest + c_sh_dc)*3
+        c_opacity, c_scales, c_rotations = 1, 3, 4
+        all_channel = (c_mean3d + c_mean2d + c_opacity + c_scales + c_rotations + c_sh)
+       
+        if only_shape:
+            return (length, all_channel)
+        else:
+            return torch.zeros((length, all_channel), dtype=torch.float32, device=device, requires_grad=False)
+    
+    return zipper, unzipper, space4render_info, unzipper_requires_grad
+
+def gather_tensor_and_grad_of_render_info(send_task:List[SendExtraGS], local_pool:Dict[tuple, RenderInfoFromGS], extra_grad:Dict[tuple, RenderInfoFromGS]):
+    tensors, grads = [], []
+    for t in send_task:
+        tag = (t.src_model_id, t.dst_model_id)
+        tensors.extend(local_pool[tag])
+        grads.extend(extra_grad[tag])
+    return tensors, grads
