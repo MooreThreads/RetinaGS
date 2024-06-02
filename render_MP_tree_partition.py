@@ -257,9 +257,10 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     tb_writer:SummaryWriter = LOGGERS[0]
     logger:logging.Logger = LOGGERS[1]
     scene, BVH_DEPTH = SceneV3(dataset_args, None, shuffle=False), args.bvh_depth
-    scene.save_img_path = os.path.join('/jfs/burning/profiles/matrix_city/train/rank_{}'.format(RANK))
+    # scene.save_img_path = os.path.join('/jfs/burning/profiles/matrix_city/train/rank_{}'.format(RANK))
     os.makedirs(scene.save_img_path, exist_ok=True)
 
+    logger.info('try to find newest ply')
     # find newest ply
     ply_iteration = pgc.find_ply_iteration(scene=scene, logger=logger) if ply_iteration <= 0 else ply_iteration
     assert ply_iteration > 0, 'can not find ply'
@@ -288,6 +289,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     )
     local_func_blender = pgg.build_func_blender(final_background=final_background, logger=logger)
 
+    logger.info('try to load tree info')
     # load partition of space 
     if RANK == 0:
         path2bvh_nodes, sorted_leaf_nodes, tree_str = pgg.load_model_division(scene_3d_grid, path2node_info_dict, logger=logger)
@@ -297,6 +299,7 @@ def rendering(args, dataset_args, opt, pipe, testing_iterations, ply_iteration, 
     else:
         path2bvh_nodes, sorted_leaf_nodes, tree_str = None, None, ''
 
+    logger.info('try to init gs model')
     # init GS models with partition
     model_id2box, model_id2rank, local_model_ids = pgg.init_GS_model_division_dist(sorted_leaf_nodes, logger)
     local_model_ids.sort()

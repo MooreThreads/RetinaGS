@@ -465,8 +465,10 @@ def render_info_from_GS(src_id:int, gaussians: BoundedGaussianModel, dst_models:
     # find the small amount GS that go beyond optical field
     scene_voxel_size = torch.tensor(scene_3d_grid.voxel_size, device='cuda')
     scene_range_low = torch.tensor(scene_3d_grid.range_low, device='cuda')
-    range_low_gpu = (gaussians.range_low * scene_voxel_size + scene_range_low).view(-1)
-    range_up_gpu = (gaussians.range_up * scene_voxel_size + scene_range_low).view(-1)
+
+    src_box = modelId2Boxes[src_id]
+    range_low_gpu = (torch.tensor(src_box.range_low, device='cuda') * scene_voxel_size + scene_range_low).view(-1)
+    range_up_gpu = (torch.tensor(src_box.range_up, device='cuda') * scene_voxel_size + scene_range_low).view(-1)
 
     max_radii, _idx = torch.max(main_info.scales, dim=-1, keepdim=True)
     max_radii = (max_radii*3).clamp(min=0)
