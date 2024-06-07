@@ -3,6 +3,7 @@ import torch.distributed as dist
 from abc import ABC, abstractmethod
 from scene.cameras import Camera, ViewMessage, Patch
 from typing import NamedTuple
+from parallel_utils.grid_utils.utils import BoxinGrid3D
 
 
 class SendTask(NamedTuple):
@@ -33,3 +34,21 @@ class MainRankTask(NamedTuple):
     rank: int
     task: ViewMessage 
 
+
+# send extra gs info
+class SendExtraGS(NamedTuple):
+    src_model_id: int
+    dst_model_id: int
+    src_rank: int
+    dst_rank: int
+    grid_range: BoxinGrid3D # box of dst_model
+    length: int
+
+
+class RecvExtraGS(NamedTuple):
+    src_model_id: int
+    dst_model_id: int
+    src_rank: int
+    dst_rank: int
+    grid_range: BoxinGrid3D
+    length: int

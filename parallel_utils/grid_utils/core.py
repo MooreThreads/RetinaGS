@@ -170,6 +170,8 @@ def update_densification_stat(iteration, opt, gaussians_group:BoundedGaussianMod
             _visibility_filter, _radii = local_render_rets[k]['visibility_filter'], local_render_rets[k]['radii']
             _gaussians:BoundedGaussianModel = gaussians_group.get_model(model_id)
             assert _gaussians is not None
+            valid_length = _gaussians._xyz.shape[0]
+            _visibility_filter, _radii = _visibility_filter[:valid_length], _radii[:valid_length]
             _gaussians.max_radii2D[_visibility_filter] = torch.max(_gaussians.max_radii2D[_visibility_filter], _radii[_visibility_filter])
             _gaussians.denom[_visibility_filter] += 1
             
@@ -231,8 +233,9 @@ def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model
     model_path:str = scene.model_path
     
     glob_path = os.path.join(
-        *(model_path.split('/')[:-1]), '*'
+        os.path.abspath(os.path.join(model_path, '..')), '*'
     )
+    logger.info('glob in dir {}'.format(glob_path))
     point_cloud_path = os.path.join(glob_path, "point_cloud/iteration_{}".format(ply_iteration))
 
     for mid in local_model_ids:
