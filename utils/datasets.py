@@ -9,7 +9,7 @@ from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON, loadCam, loadEmptyCam
 from PIL import Image
 from scene.dataset_readers import CameraInfo, SceneInfo
-from scene.cameras import Camera, EmptyCamera, ViewMessage, Patch
+from scene.cameras import Camera, EmptyCamera, Patch
 import torch
 from torch.utils.data import Dataset
 import numpy as np

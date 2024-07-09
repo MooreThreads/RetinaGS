@@ -130,16 +130,6 @@ class OptimizationParams(ParamGroup):
         self.huber_loss_replacement_enable = False
         self.only_prune_via_screen_space_enable = False     
         self.screen_size_threshold = 20
-        self.BA = False
-        self.BA_start_iterations = 20_000
-        self.camera_q_lr_init = 0.0016
-        self.camera_q_lr_final = 0.000016
-        self.camera_q_lr_delay_mult = 0.01
-        self.camera_q_lr_max_steps = 30_000
-        self.camera_t_lr_init = 0.0016
-        self.camera_t_lr_final = 0.000016
-        self.camera_t_lr_delay_mult = 0.01
-        self.camera_t_lr_max_steps = 30_000
 
         self.scales_reg_2d = False
         self.scales_reg_2d_lr = 0.001

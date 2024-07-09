@@ -7,8 +7,8 @@ import numba
 import numpy as np
 from scipy.spatial import HalfspaceIntersection, ConvexHull, Delaunay
 from abc import ABC, abstractmethod
-from scene.cameras import Camera, ViewMessage
-from typing import NamedTuple
+from scene.cameras import Camera
+from typing import NamedTuple, Dict, List
 import pickle
 import logging
 
@@ -81,7 +81,7 @@ class ViewFrustum:
     """
     A view frustum in continuous 3d space
     """
-    def __init__(self, msg: ViewMessage, z_near=None, z_far=None) -> None:
+    def __init__(self, msg: Camera, z_near=None, z_far=None) -> None:
         tanHalfFovY = math.tan((msg.FoVy / 2))
         tanHalfFovX = math.tan((msg.FoVx / 2))
         self.z_near = max(0.01, 0.01 if z_near is None else z_near)
@@ -112,7 +112,7 @@ class ViewFrustum:
         self.vertexs = np.concatenate((vertexs_near, vertexs_far), axis=0)
 
 
-def is_overlapping_SpaceBox_View(s:SpaceBox, v:ViewMessage, z_far=1e6, z_near=0.01):
+def is_overlapping_SpaceBox_View(s:SpaceBox, v:Camera, z_far=1e6, z_near=0.01):
     vf = ViewFrustum(v, z_far=z_far, z_near=z_near)
 
     box_vertexs = np.concatenate((s.vertexs, np.ones((8, 1), dtype=np.float32)), axis=1)
@@ -141,6 +141,7 @@ def is_overlapping_SpaceBox_View(s:SpaceBox, v:ViewMessage, z_far=1e6, z_near=0.
 def accum_on_3Dgrid(grid: np.ndarray, value:np.ndarray, index:np.ndarray):
     """
     scatter points into a 3d array
+    pytorch index_add can not guarantee a correct result
     """
     x_max, y_max, z_max = grid.shape
     for _i, v in enumerate(value):
@@ -377,12 +378,12 @@ def load_BvhTree_on_3DGrid(file_path:str):
         save_dict:dict = pickle.load(f)
 
     grid_range_low, grid_range_up, grid_size = save_dict.pop('grid_info')
-    path2node_info_dict = save_dict
+    path2node_info_dict:Dict[str, List] = save_dict
     return grid_range_low, grid_range_up, grid_size, path2node_info_dict
 
 
 def build_BvhTree_on_3DGrid_with_info(path2node_info:dict, grid:Grid3DSpace):
-    path2node = {}
+    path2node:Dict[str, BvhTreeNodeon3DGrid] = {}
     # create nodes
     for path in path2node_info:
         range_low, range_up, split_orders = path2node_info[path]

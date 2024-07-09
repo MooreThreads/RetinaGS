@@ -9,6 +9,7 @@ build/
 diff_gaussian_rasterization_*.egg-info/
 dist/
 script/
+debugger/
 
 !scripts/colmap_complete_process.sh
 !scripts/colmap_mill19_with_known_pose.sh

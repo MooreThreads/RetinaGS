@@ -4,12 +4,3 @@
 [submodule "submodules/diff-gaussian-rasterization"]
 	path = submodules/diff-gaussian-rasterization
 	url = https://github.com/graphdeco-inria/diff-gaussian-rasterization
-[submodule "rasterization_kernels/diff-gaussian-rasterization-ashawkey"]
-	path = rasterization_kernels/diff-gaussian-rasterization-ashawkey
-	url = https://github.com/ashawkey/diff-gaussian-rasterization.git
-[submodule "submodules/Pytorch-GaussianSplatting"]
-	path = submodules/Pytorch-GaussianSplatting
-	url = https://sh-code.mthreads.com/ai/Pytorch-GaussianSplatting
-[submodule "rasterization_kernels/diff-gaussian-rasterization-for-gsslam"]
-	path = rasterization_kernels/diff-gaussian-rasterization-for-gsslam
-	url = https://githubfast.com/NPU-YanChi/diff-gaussian-rasterization-for-gsslam.git

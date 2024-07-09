@@ -5,7 +5,8 @@ from typing import NamedTuple
 import numpy as np
 import logging
 from torch.profiler import record_function
-
+from typing import List, Callable, Dict
+from enum import Enum
 
 # assume all shape is of size 3
 def _send_shape(tensor_send: torch.Tensor, dst: int, group: torch.distributed.ProcessGroup):
@@ -217,3 +218,16 @@ def batched_send_recv_v2(send_tasks, recv_tasks, logger:logging.Logger):
     torch.cuda.synchronize()
     logger.debug('right 2 left pass')
     logger.debug('batched_send_recv v2')    
+
+BATCHED_SEND_RECV_DICT = {
+    0: batched_send_recv_v0,
+    1: batched_send_recv_v1,
+    2: batched_send_recv_v2,
+    '0': batched_send_recv_v0,
+    '1': batched_send_recv_v1,
+    '2': batched_send_recv_v2,
+    '0+profiling': batched_send_recv_v0_profiling,
+}
+
+def get_batched_send_recv_function(version):
+    return BATCHED_SEND_RECV_DICT[version]

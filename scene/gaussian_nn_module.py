@@ -22,9 +22,7 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_renderer.render import render4GaussianModel2
 from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
-from gaussian_renderer.render_metric import render_with_GradNormHelper as render_metric
-import gaussian_renderer.pytorch_gs_render.pytorch_render as pytorch_render
-from scene.cameras import ViewMessage, Camera, Patch
+from scene.cameras import Camera, Patch
 
 
 class GaussianModel2(nn.Module):
@@ -67,9 +65,6 @@ class GaussianModel2(nn.Module):
         self.device = torch.device(device)
         self.range_low = torch.tensor(range_low, dtype=torch.float32).to(self.device)
         self.range_up = torch.tensor(range_up, dtype=torch.float32).to(self.device)
-
-        self._all_features = None 
-        self._xyz_home = None
 
     def capture(self):
         return (
@@ -118,29 +113,14 @@ class GaussianModel2(nn.Module):
     @property
     def get_xyz(self):
         return self._xyz
-    
-    @property
-    def get_xyz_hom(self):
-        if self._xyz_home is not None:
-            return self._xyz_home
-        else:
-            self._xyz_home = torch.cat([self.get_xyz, torch.ones_like(self._opacity)], dim=-1)
-            return self._xyz_home 
 
     @property
     def get_features(self):
-        if self._all_features is not None:
-            return self._all_features
-        else:
-            features_dc = self._features_dc
-            features_rest = self._features_rest
-            self._all_features = torch.cat((features_dc, features_rest), dim=1)
-            return self._all_features
+        features_dc = self._features_dc
+        features_rest = self._features_rest
+        all_features = torch.cat((features_dc, features_rest), dim=1)
+        return all_features
 
-    def clean_cached_features(self):
-        self._all_features = None 
-        self._xyz_home = None   
-    
     @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
@@ -376,7 +356,6 @@ class GaussianModel2(nn.Module):
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
-        self.clean_cached_features()
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -421,8 +400,7 @@ class GaussianModel2(nn.Module):
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device)
-        self.clean_cached_features()    # discard cached feature 
+        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device) 
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -534,26 +512,6 @@ class GaussianModel2(nn.Module):
     def forward(self, viewpoint_cam, pipe, background):
         return render4GaussianModel2(viewpoint_cam, self, pipe, background)            
 
-def create_batch(patches:list):
-    # assume all patch has the same complete shape
-    batch_data, batch_size = {}, len(patches)
-    example_p:Patch = patches[0]
-    H, W = example_p.complete_height, example_p.complete_width
-
-    batch_data['packed_views'] = torch.stack([p.pack_up() for p in patches])
-    max_tile_num = max([len(p.all_tiles) for p in patches]) 
-    batch_data['tile_maps'] = torch.zeros((batch_size, max_tile_num), dtype=torch.int, device='cuda')
-    batch_data['tile_nums'] = []
-    for i in range(batch_size):
-        p:Patch = patches[i]
-        num_valid_tile = len(p.all_tiles)
-        batch_data['tile_maps'][i, :num_valid_tile] = p.all_tiles
-        batch_data['tile_nums'].append(num_valid_tile)
-    batch_data['tile_maps_sizes'] = torch.tensor([math.ceil(W/16), math.ceil(H/16)], device='cuda').view(-1, 2).repeat(batch_size, 1)    
-    batch_data['tile_maps_sizes_list'] = [math.ceil(W/16), math.ceil(H/16)]
-    batch_data['image_size_list'] = [math.ceil(W), math.ceil(H)]
-    batch_data['patches_cpu'] = patches  # it's okay to use patch on gpu 
-    return batch_data
 
 class BoundedGaussianModel(GaussianModel2):
     def __init__(self, sh_degree: int, range_low=[0, 0, 0], range_up=[0, 0, 0], device="cuda", max_size:int=None):
@@ -561,7 +519,6 @@ class BoundedGaussianModel(GaussianModel2):
         self.max_size = max_size
 
     def forward(self, viewpoint_cam, pipe, background, need_buffer:bool=False):
-        
         if pipe.render_version == 'default':
             all_ret = render4BoundedGaussianModel(viewpoint_cam, self, pipe, background)   
             if need_buffer:
@@ -577,18 +534,10 @@ class BoundedGaussianModel(GaussianModel2):
                     "num_rendered": all_ret["num_rendered"],
                 }
         elif pipe.render_version == '3d_gs':
-            # we need alpha map, thus use render metric 
-            ret = render_metric(viewpoint_cam, self, pipe, background)    
-            return ret
-        elif pipe.render_version == 'pytorch_render':
-            # this is not a goot way to call pytorch_render_raster
-            # but it is simple and suitable for testing
-            assert isinstance(viewpoint_cam, Camera)
-            patch = Patch(viewpoint_cam, uid=0, 
-                          v_start=0, u_start=0,
-                          v_end=viewpoint_cam.image_height, u_end=viewpoint_cam.image_width)
-            batch = create_batch([patch])
-            return pytorch_render.render(self, batch_data=batch)[0]
+            # use render_metric or render_ashawkey kernel
+            # disable this feature in release version as it was implemented for ablation
+            # 3d_gs kernel leads to errors on partition planes, which is talked in the paper
+            raise NotImplementedError('not render of version {}'.format(pipe.render_version))
         else:
             raise NotImplementedError('not render of version {}'.format(pipe.render_version))
     
@@ -860,12 +809,7 @@ class BoundedGaussianModelGroup(nn.Module):
     def update_learning_rate(self, iteration):    
         for uid in self.all_gaussians:
             gau = self.all_gaussians[uid]
-            gau.update_learning_rate(iteration) 
-
-    def clean_cached_features(self):    
-        for uid in self.all_gaussians:
-            gau = self.all_gaussians[uid]
-            gau.clean_cached_features()        
+            gau.update_learning_rate(iteration)      
 
     def oneupSHdegree(self):    
         for uid in self.all_gaussians:
@@ -888,72 +832,4 @@ class BoundedGaussianModelGroup(nn.Module):
             ret.append(f"{k}:{self.all_gaussians[k].get_info()}")
         return '\n'.join(ret)
 
-    @staticmethod
-    def pack_up_render_ret(render_ret):
-        '''
-        pack up color, radii, alpha into one tensor
-        viewspace_points/visibility_filter/radii is only used in management of gaussian points
-        '''    
-        with torch.no_grad():
-            # (5, H, W) tensor
-            pkg = torch.cat(
-                [render_ret["render"], render_ret["depth"], render_ret["alpha"]], 
-                dim=0
-            ).to(dtype=torch.float32) 
-        return pkg
-    
-    @staticmethod
-    def unpack_up_render_ret(pkg: torch.Tensor):
-        # inversion of pack_up_render_ret
-        # Do not forget to set requires_grad, space-allocating function may not do it 
-        assert pkg.shape[0] == 5 and len(pkg.shape) == 3
-        return {
-            "render": pkg[:3].clone().detach().requires_grad_(True),
-            "depth": pkg[3:4].clone().detach().requires_grad_(True),
-            "alpha": pkg[4:5].clone().detach().requires_grad_(True)
-        }
-
-    @staticmethod
-    def space_for_task(task:ViewMessage, device='cuda', only_shape=False):
-        '''
-        task: Camera|ViewMessage
-        '''
-        H, W = task.image_height, task.image_width
-        if only_shape:
-            return (5, H, W)
-        else:
-            return torch.zeros((5, H, W), dtype=torch.float32, device=device, requires_grad=False)
-    
-    @staticmethod
-    def pack_up_grad_of_render_ret(render_ret):
-        def fetch_grad(t: torch.Tensor):
-            return torch.zeros_like(t, dtype=torch.float32) if t.grad is None else t.grad
-
-        with torch.no_grad():
-            pkg = torch.cat(
-                [fetch_grad(render_ret["render"]), fetch_grad(render_ret["depth"]), fetch_grad(render_ret["alpha"])], 
-                dim=0
-            )
-        return pkg
-
-    @staticmethod
-    def unpack_up_grad_of_render_ret(pkg: torch.Tensor):
-        # inversion of pack_up_grad_of_render_ret
-        assert pkg.shape[0] == 5 and len(pkg.shape) == 3
-        return {
-            "render": pkg[:3],
-            "depth": pkg[3:4],
-            "alpha": pkg[4:5]
-        }
-
-    @staticmethod
-    def space_for_grad_of_task(task:ViewMessage, device='cuda', only_shape=False):
-        '''
-        task: Camera|ViewMessage
-        '''
-        H, W = task.image_height, task.image_width
-        if only_shape:
-            return (5, H, W)
-        else:    
-            return torch.zeros((5, H, W), dtype=torch.float32, device=device, requires_grad=False)
     
