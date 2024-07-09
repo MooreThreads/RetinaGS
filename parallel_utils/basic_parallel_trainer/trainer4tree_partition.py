@@ -694,7 +694,7 @@ class Trainer4TreePartition:
                         Ll1, PSNR = l1_loss(image, gt_image).mean().item(), psnr(image, gt_image).mean().item()
                         self.logger.info('{}, image {}, psnr {}, l1 {}'.format(name, ori_camera.image_name, PSNR, Ll1))
                         if self.tb_writer and (ori_camera.uid < 1000) and (ori_camera.uid % 5 == 0):
-                            self.tb_writer.add_images(name + "_view_{}/render".format(ori_camera.image_name), image[None], global_step=train_iteration)
+                            self.tb_writer.add_images(name + "_view_{}/render".format(ori_camera.image_name), image.clamp(min=0,max=1.0)[None], global_step=train_iteration)
                             self.tb_writer.add_images(name + "_view_{}/ground_truth".format(ori_camera.image_name), gt_image[None], global_step=train_iteration)
                         num_samples += 1; psnr_total += PSNR; l1_total += Ll1
                         if self.args.SAVE_EVAL_IMAGE:
