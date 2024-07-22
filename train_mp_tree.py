@@ -49,6 +49,7 @@ def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, 
     current_time = time.strftime("%Y_%m_%d_%H", time.localtime())
     debug_logger = logging.getLogger('debugger')
 
+    os.makedirs('debugger/', exist_ok=True)
     file_handler = logging.FileHandler('debugger/debug_{}_{}.txt'.format(rank, current_time), mode='a')
     file_handler.setFormatter(logging.Formatter('%(asctime)s-%(filename)s[line:%(lineno)d]-%(levelname)s: %(message)s'))
     debug_logger.addHandler(file_handler)
