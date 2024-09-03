@@ -1,3 +1,23 @@
+# RetinaGS
+
+## Introduction
+...
+
+## Prerequisites
+...
+### Installation
+...
+### Get pretrained models
+... 
+
+## Usage
+### Evaluation
+...
+
+### Data 
+...
+
+### Training 
 An example for 4-times downsampled graden (for the best consistentance with original 3D-GS train.py, it sets MAX_BATCH_SIZE as 1 which actually lowers the training speed):
 ```
 CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
@@ -17,4 +37,22 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4
 ```
 Here is a screenshot of tensorboard (The 2.337 hours is not very representive, there were other training processes on the same server.):
 ![image](logs/tb_screenshot.png)
+
+
+## Citation
+Please cite the following paper if you use this repository in your reseach or work.
+```
+@article{li2024retinags,
+  title={RetinaGS: Scalable Training for Dense Scene Rendering with Billion-Scale 3D Gaussians},
+  author={Li, Bingling and Chen, Shengyi and Wang, Luchao and He, Kaimin and Yan, Sijie and Xiong, Yuanjun},
+  journal={arXiv preprint arXiv:2406.11836},
+  year={2024}
+}
+```
+
+
+## License
+## Contact
+
+
 
