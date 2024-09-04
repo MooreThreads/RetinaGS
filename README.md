@@ -8,21 +8,50 @@
 ### Installation
 ...
 ### Get pretrained models
+Garden/Scan
 ... 
 
 ## Usage
+
+
 ### Evaluation
+... demo ...
+
+### Model Zoo
+Model, Splited Model, PSNR, #GS。。。。
+Garden
+Scan
+MatrixCity Aerial
+Full MatrixCity
 ...
 
 ### Data 
-...
+The data should be orgnised as follows:
+```
+data/
+├── dataset_name
+│   ├── scene1/
+│   │   ├── images
+│   │   │   ├── IMG_0.jpg
+│   │   │   ├── IMG_1.jpg
+│   │   │   ├── ...
+│   │   ├── sparse/
+│   │       └──0/
+│   ├── scene2/
+│   │   ├── images
+│   │   │   ├── IMG_0.jpg
+│   │   │   ├── IMG_1.jpg
+│   │   │   ├── ...
+│   │   ├── sparse/
+│   │       └──0/
+```
 
 ### Training 
 An example for 4-times downsampled graden (for the best consistentance with original 3D-GS train.py, it sets MAX_BATCH_SIZE as 1 which actually lowers the training speed):
 ```
 CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
     --master_addr=127.0.0.1 --master_port=7356 \
-    train_mp_tree.py -s dataset/garden \
+    train_mp_tree.py -s data/garden \
         -m backup/mp_garden_shared_gs --bvh_depth 2 \
         --eval --log_level 20 --SHRAE_GS_INFO \
         --epochs 187 \
