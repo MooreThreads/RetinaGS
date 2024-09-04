@@ -1,6 +1,11 @@
 # RetinaGS: Scalable Training for Dense Scene Rendering with Billion-Scale 3D Gaussians
 
+<img src="./assets/teaser.png">
+
 We introduce RetinaGS, which explores the possibility of training high-parameter 3D Gaussian splatting (3DGS) models on large-scale, high-resolution datasets. This codebase maintain a model parallel traning framework for native 3DGS which uses a proper rendering equation and can be applied to any scene and arbitrary distribution of Gaussian primitives. 
+
+<img src="./assets/pipeline.png">
+
 
 [[Project Page]](https://ai-reality.github.io/RetinaGS/)
 [[Paper]](https://arxiv.org/pdf/2406.11836)
