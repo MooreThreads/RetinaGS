@@ -9,29 +9,24 @@ We introduce RetinaGS, which explores the possibility of training high-parameter
 
 [[Project Page]](https://ai-reality.github.io/RetinaGS/)
 [[Paper]](https://arxiv.org/pdf/2406.11836)
-[[Code]](https://github.com/MooreThreads/RetinaGS)
 
 ## Prerequisites
-...
+Set up a environment following the guidance in https://github.com/graphdeco-inria/gaussian-splatting
+
 ### Installation
-...
-### Get pretrained models
-Garden/Scan
-... 
+Install new raster-kernel in rasterization_kernels/diff-gaussian-rasterization-half-gaussian (python package name and namespace in cuda have already been modified for avoiding conflicts).
+
+```
+cd rasterization_kernels/diff-gaussian-rasterization-half-gaussian
+python -m setup.py install
+```
 
 ## Usage
 
-
-### Evaluation
-... demo ...
-
-### Model Zoo
-Model, Splited Model, PSNR, #GS。。。。
-Garden
-Scan
-MatrixCity Aerial
-Full MatrixCity
-...
+### Get pretrained models
+[[Garden]](https://ai-reality.github.io/RetinaGS/)
+[[ScanNet++]](https://ai-reality.github.io/RetinaGS/)
+... 
 
 ### Data 
 The data should be orgnised as follows:
@@ -53,24 +48,43 @@ data/
 │       └──0/
 ```
 
+### Evaluation
+... demo ...
+
+### Model Zoo
+Model, Splited Model, PSNR, #GS。。。。
+Garden
+Scan
+MatrixCity Aerial
+Full MatrixCity
+...
+
+
+
 ### Training 
-An example for distributed training with 4 subspaces on a small garden dataset:
+For single node, an example command is:
 ```
-CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
+CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
-    train_mp_tree.py -s data/garden \
-        -m backup/mp_garden_shared_gs --bvh_depth 2 \
-        --eval --log_level 20 --SHRAE_GS_INFO \
+    train_MP_tree.py -s path/2/data \
+        -m path/2/model --bvh_depth 2 \
+        --eval \
         --epochs 187 \
-        --scaling_lr_init 0.005 \
-        --scaling_lr_final 0.005 \
-        --densification_interval 600 \
-        --densify_until_iter 15000 \
-        --opacity_reset_interval 3000 \
-        --MAX_BATCH_SIZE 1  --MAX_LOAD 8 \
-        --EVAL_INTERVAL_EPOCH 10 --SAVE_INTERVAL_EPOCH 30 \
-        --ENABLE_REPARTITION --REPARTITION_INTERVAL_EPOCH 50  --REPARTITION_START_EPOCH 1 --REPARTITION_END_EPOCH 200
+        --max_batch_size 4  --max_load 8  
 ```
+Here, you would create 2**(bvh_depth) submodels for 2 processes, namely 2 submodels for each process. The max_batch_size and max_load are arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 
+
+For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/: 
+```
+torchrun --nnodes=$NNODES --node_rank=$NODE_RANK --nproc_per_node=$NUM_GPU_PER_NODE \
+    --master_addr=$MASTER_ADDR --master_port=39527  \
+    train_MP_tree.py \
+        -s path/2/data \
+        -m path/2/model --bvh_depth 6 \
+        --epochs 40  --eval \
+        --bvh_depth 4 \
+        --max_batch_size 4  --max_load 8
+``` 
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
