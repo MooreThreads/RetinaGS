@@ -4,6 +4,7 @@ We introduce RetinaGS, which explores the possibility of training high-parameter
 
 [[Project Page]](https://ai-reality.github.io/RetinaGS/)
 [[Paper]](https://arxiv.org/pdf/2406.11836)
+[[Code]](https://github.com/MooreThreads/RetinaGS)
 
 ## Prerequisites
 ...
@@ -31,25 +32,24 @@ Full MatrixCity
 The data should be orgnised as follows:
 ```
 data/
-├── dataset_name
-│   ├── scene1/
-│   │   ├── images
-│   │   │   ├── IMG_0.jpg
-│   │   │   ├── IMG_1.jpg
-│   │   │   ├── ...
-│   │   ├── sparse/
-│   │       └──0/
-│   ├── scene2/
-│   │   ├── images
-│   │   │   ├── IMG_0.jpg
-│   │   │   ├── IMG_1.jpg
-│   │   │   ├── ...
-│   │   ├── sparse/
-│   │       └──0/
+├── scene1/
+│   ├── images
+│   │   ├── IMG_0.jpg
+│   │   ├── IMG_1.jpg
+│   │   ├── ...
+│   ├── sparse/
+│       └──0/
+├── scene2/
+│   ├── images
+│   │   ├── IMG_0.jpg
+│   │   ├── IMG_1.jpg
+│   │   ├── ...
+│   ├── sparse/
+│       └──0/
 ```
 
 ### Training 
-An example for 4-times downsampled graden (for the best consistentance with original 3D-GS train.py, it sets MAX_BATCH_SIZE as 1 which actually lowers the training speed):
+An example for distributed training with 4 subspaces on a small garden dataset:
 ```
 CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
     --master_addr=127.0.0.1 --master_port=7356 \
@@ -66,9 +66,6 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --standalone --nnodes=1 --nproc_per_node=4
         --EVAL_INTERVAL_EPOCH 10 --SAVE_INTERVAL_EPOCH 30 \
         --ENABLE_REPARTITION --REPARTITION_INTERVAL_EPOCH 50  --REPARTITION_START_EPOCH 1 --REPARTITION_END_EPOCH 200
 ```
-Here is a screenshot of tensorboard (The 2.337 hours is not very representive, there were other training processes on the same server.):
-![image](logs/tb_screenshot.png)
-
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
