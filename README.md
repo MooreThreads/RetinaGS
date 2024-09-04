@@ -1,7 +1,9 @@
-# RetinaGS
+# RetinaGS: Scalable Training for Dense Scene Rendering with Billion-Scale 3D Gaussians
 
-## Introduction
-...
+We introduce RetinaGS, which explores the possibility of training high-parameter 3D Gaussian splatting (3DGS) models on large-scale, high-resolution datasets. This codebase maintain a model parallel traning framework for native 3DGS which uses a proper rendering equation and can be applied to any scene and arbitrary distribution of Gaussian primitives. 
+
+[[Project Page]](https://ai-reality.github.io/RetinaGS/)
+[[Paper]](https://arxiv.org/pdf/2406.11836)
 
 ## Prerequisites
 ...
@@ -78,10 +80,13 @@ Please cite the following paper if you use this repository in your reseach or wo
   year={2024}
 }
 ```
-
-
 ## License
-## Contact
+Copyright @2023-2024 Moore Threads Technology Co., Ltd("Moore Threads"). All rights reserved. This software may contains part codes from gaussian-splatting，gaussian-splatting is licensed under the Gaussian-Splatting License. Some files of gaussian-splatting may have been modified by Moore Threads Technology Co., Ltd.  Certain derivative work developed by Moore Threads Technology Co., Ltd are subject to the Gaussian-Splatting License.
 
+## Contact
+```
+Bingling Li    :   lblhust903@gmail.com
+Shengyi Chen   :   pythonchanner@gmail.com
+```
 
 
