@@ -31,20 +31,16 @@ git clone https://github.com/mthreads/DenseGaussian.git --recursive
 ### 3DGS Setup
 Our implement is based on 3DGS. First, set up a environment following the guidance in https://github.com/graphdeco-inria/gaussian-splatting
 
-Our default, provided install method is based on Conda package and environment management:
 ```shell
 conda env create --file environment.yml
 conda activate gaussian_splatting
 ```
-Please note that this process assumes that you have CUDA SDK 11 installed, not 12. For modifications, see below.
-
-If you can afford the disk space, we recommend using our environment files for setting up a training environment identical to ours. If you want to make modifications, please note that major version changes might affect the results of our method. However, our (limited) experiments suggest that the codebase works just fine inside a more up-to-date environment (Python 3.8, PyTorch 2.0.0, CUDA 12). Make sure to create an environment where PyTorch and its CUDA runtime version match and the installed CUDA SDK has no major version difference with PyTorch's CUDA version.
 
 ### RetinaGS Setup
 Install additional packages for RetinaGS.
 
 ```
-pip install numba opencv-python scipy
+conda install numba opencv-python scipy
 ```
 
 Install new raster-kernel in rasterization_kernels/diff-gaussian-rasterization-half-gaussian.
