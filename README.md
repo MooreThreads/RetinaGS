@@ -32,6 +32,7 @@ git clone https://github.com/mthreads/DenseGaussian.git --recursive
 Our implement is based on 3DGS. First, set up a environment following the guidance in https://github.com/graphdeco-inria/gaussian-splatting
 
 ```shell
+SET DISTUTILS_USE_SDK=1 # Windows only
 conda env create --file environment.yml
 conda activate gaussian_splatting
 ```
