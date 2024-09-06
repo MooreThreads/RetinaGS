@@ -106,17 +106,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
 ```
 Here, you would create 2**(bvh_depth) submodels for 2 processes, namely 2 submodels for each process. The max_batch_size and max_load are arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 
 
-For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/: 
-```
-torchrun --nnodes=$NNODES --node_rank=$NODE_RANK --nproc_per_node=$NUM_GPU_PER_NODE \
-    --master_addr=$MASTER_ADDR --master_port=39527  \
-    train_MP_tree.py \
-        -s path/2/data \
-        -m path/2/model --bvh_depth 6 \
-        --epochs 40  --eval \
-        --bvh_depth 4 \
-        --max_batch_size 4  --max_load 8
-``` 
+For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
