@@ -56,7 +56,7 @@ Please note that we only test RetinaGS on Linux System.
 ## Usage
 
 ### Data 
-The data could be orgnised as follows:
+The data could be orgnised as follows (Colmap formulation):
 ```
 data/
 ├── scene1/
@@ -75,7 +75,7 @@ data/
 │       └──0/
 ```
 
-也支持其他数据格式（如blender和MegaNeRF），见scene/simple_scene.py的37~53
+也支持其他数据格式（如blender和MegaNeRF），见scene/simple_scene.py的Line 37~53.
 
 ### Model 
 
