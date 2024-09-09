@@ -87,23 +87,28 @@ model/
 │   ├── rank_0
 │   │   ├── point_cloud
 │   │   │   ├── iteration_xxx
+│   │   │   │   ├── point_cloud_xx.ply
+│   │   │   │   ├── point_cloud_yy.ply
+│   │   │   │   ├── ...
 │   │   ├── tree_0.txt
 │   │   ├── trainset_relation.pt
+│   │   ├── testset_relation.pt
 │   │   ├── cfg_args
 │   ├── rank_1
 │   │   ├── point_cloud
 │   │   │   ├── iteration_xxx
+│   │   │   │   ├── point_cloud_zz.ply
+│   │   │   │   ├── point_cloud_vv.ply
+│   │   │   │   ├── ...
+│   ├── rank_2
+│   │   ├── point_cloud
+│   │   │   ├── iteration_xxx
+│   │   │   │   ├── point_cloud_mm.ply
+│   │   │   │   ├── point_cloud_nn.ply
+│   │   │   │   ├── ...
 │   |── ...
 ├── scene2_split_model/
-│   ├── rank_0
-│   │   ├── point_cloud
-│   │   │   ├── iteration_xxx
-│   │   ├── tree_0.txt
-│   │   ├── trainset_relation.pt
-│   ├── rank_1
-│   │   ├── point_cloud
-│   │   │   ├── iteration_xxx
-│   |── ...
+│   ├── ...
 ```
 
 ```
@@ -113,9 +118,7 @@ model/
 │   │   ├── iteration_xxx
 │   ├── cfg_args
 ├── scene2_whole_model/
-│   ├── point_cloud
-│   │   ├── iteration_xxx
-│   ├── cfg_args
+│   ├── ...
 ```
 
 ### Evaluation
@@ -171,7 +174,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
         --position_lr_init 0.0000016 \
         --position_lr_final 0.000000016 \
         --densify_until_epoch 0 \
-        --points3D "MVS_points3D" --pointcloud_sample_rate 1
+        --points3D MVS_points3D --pointcloud_sample_rate 1
 ```
 
 加一个flag可以实现存单个ply，读单个ply分配到多个GPU
