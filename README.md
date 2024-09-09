@@ -56,7 +56,7 @@ Please note that we only test RetinaGS on Linux System.
 ## Usage
 
 ### Data 
-The data should be orgnised as follows:
+The data could be orgnised as follows:
 ```
 data/
 ├── scene1/
@@ -79,7 +79,7 @@ data/
 
 ### Model 
 
-支持两种模式，split和whole
+支持两种模式，split和whole，分别格式为
 
 ### Evaluation
 Get data and pretrained models ([[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/))
@@ -101,13 +101,13 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
 | [[Garden-full]](https://ai-reality.github.io/RetinaGS/)       |27.06 |62.94M |   26.67      |   7.39M     |
 | [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |   28.95      |   2.65M     |
 | [[MatrixCity-M]](https://ai-reality.github.io/RetinaGS/)      |31.12 |62.18M |   27.81      |   1.53M     |
-| [[Mega-NeRF]](https://ai-reality.github.io/RetinaGS/)         |25.09 |27.9M  |   21.74      |   4.7M      |
+| [[Mega-NeRF]](https://ai-reality.github.io/RetinaGS/)         |25.09 |27.9M  |   24.47      |   4.7M      |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |   24.47      |   25.06M    |
 
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results.
 
 ### Training 
-For single node, an example command is:
+For single node, an example of using default densification strategy and Colmap Initialization  command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
@@ -115,11 +115,29 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
         -m path/2/model --bvh_depth 2 \
         --eval \
         --epochs 187 \
-        --max_batch_size 4  --max_load 8  
+        --max_batch_size 4  --max_load 8  \
+        --points3D points3D
 ```
 Here, you would create 2**(bvh_depth) submodels for 2 GPUs, namely 2 submodels for each GPU. The max_batch_size and max_load are arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 
 
 For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
+
+从MVS Initialization出发，关闭点管理
+```
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
+    --master_addr=127.0.0.1 --master_port=7356 \
+    train_MP_tree.py -s path/2/data \
+        -m path/2/model --bvh_depth 2 \
+        --eval \
+        --epochs 187 \
+        --max_batch_size 4  --max_load 8  \
+        --position_lr_init 0.0000016 \
+        --position_lr_final 0.000000016 \
+        --densify_until_epoch 0 \
+        --points3D "MVS_points3D" --pointcloud_sample_rate 1
+```
+
+加一个flag可以实现存单个ply，读单个ply分配到多个GPU
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.

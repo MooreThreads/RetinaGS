@@ -18,6 +18,7 @@ ply_purning_via_tsdf/
 scripts/
 track/
 tsdf/
+release/
 
 !scripts/colmap_complete_process.sh
 !scripts/colmap_mill19_with_known_pose.sh
