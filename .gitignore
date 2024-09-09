@@ -10,6 +10,14 @@ diff_gaussian_rasterization_*.egg-info/
 dist/
 script/
 debugger/
+Result_Json/
+farm/
+ply/
+ply_filter/
+ply_purning_via_tsdf/
+scripts/
+track/
+tsdf/
 
 !scripts/colmap_complete_process.sh
 !scripts/colmap_mill19_with_known_pose.sh

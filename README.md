@@ -55,11 +55,6 @@ Please note that we only test RetinaGS on Linux System.
 
 ## Usage
 
-### Get pretrained models
-[[Garden]](https://ai-reality.github.io/RetinaGS/)
-[[ScanNet++]](https://ai-reality.github.io/RetinaGS/)
-... 
-
 ### Data 
 The data should be orgnised as follows:
 ```
@@ -80,23 +75,41 @@ data/
 │       └──0/
 ```
 
+也支持其他数据格式（如blender和MegaNeRF），见scene/simple_scene.py的37~53
+
+### Model 
+
+支持两种模式，split和whole
+
 ### Evaluation
-... demo ...
+Get data and pretrained models ([[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/))
+
+```
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
+    --master_addr=127.0.0.1 --master_port=7356 \
+    train_MP_tree.py -s path/2/data \
+        -m path/2/model --bvh_depth 2 \
+        --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE \
+        --max_batch_size 4  --max_load 8  
+```
 
 ### Model Zoo
-Model, Splited Model, PSNR, #GS。。。。
-Garden
-Scan
-MatrixCity Aerial
-Full MatrixCity
-...
 
+| Datasets                                                      | PSNR | #GS   | PSNR of 3DGS | #GS of 3DGS |
+|:-----------------:                                            |:----:|:-----:|:------------:|:-----------:|
+| [[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/)       |27.74 |62.94M |   27.58      |   6.92M     |
+| [[Garden-full]](https://ai-reality.github.io/RetinaGS/)       |27.06 |62.94M |   26.67      |   7.39M     |
+| [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |   28.95      |   2.65M     |
+| [[MatrixCity-M]](https://ai-reality.github.io/RetinaGS/)      |31.12 |62.18M |   27.81      |   1.53M     |
+| [[Mega-NeRF]](https://ai-reality.github.io/RetinaGS/)         |25.09 |27.9M  |   21.74      |   4.7M      |
+| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |   24.47      |   25.06M    |
 
+M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results.
 
 ### Training 
 For single node, an example command is:
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
     train_MP_tree.py -s path/2/data \
         -m path/2/model --bvh_depth 2 \
@@ -104,7 +117,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nnodes=1 --nproc_per_node=2 \
         --epochs 187 \
         --max_batch_size 4  --max_load 8  
 ```
-Here, you would create 2**(bvh_depth) submodels for 2 processes, namely 2 submodels for each process. The max_batch_size and max_load are arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 
+Here, you would create 2**(bvh_depth) submodels for 2 GPUs, namely 2 submodels for each GPU. The max_batch_size and max_load are arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 
 
 For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
 
