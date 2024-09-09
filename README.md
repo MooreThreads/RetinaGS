@@ -81,6 +81,43 @@ data/
 
 支持两种模式，split和whole，分别格式为
 
+```
+model/
+├── scene1_split_model/
+│   ├── rank_0
+│   │   ├── point_cloud
+│   │   │   ├── iteration_xxx
+│   │   ├── tree_0.txt
+│   │   ├── trainset_relation.pt
+│   │   ├── cfg_args
+│   ├── rank_1
+│   │   ├── point_cloud
+│   │   │   ├── iteration_xxx
+│   |── ...
+├── scene2_split_model/
+│   ├── rank_0
+│   │   ├── point_cloud
+│   │   │   ├── iteration_xxx
+│   │   ├── tree_0.txt
+│   │   ├── trainset_relation.pt
+│   ├── rank_1
+│   │   ├── point_cloud
+│   │   │   ├── iteration_xxx
+│   |── ...
+```
+
+```
+model/
+├── scene1_whole_model/
+│   ├── point_cloud
+│   │   ├── iteration_xxx
+│   ├── cfg_args
+├── scene2_whole_model/
+│   ├── point_cloud
+│   │   ├── iteration_xxx
+│   ├── cfg_args
+```
+
 ### Evaluation
 Get data and pretrained models ([[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/))
 
