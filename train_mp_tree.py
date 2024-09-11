@@ -60,7 +60,7 @@ def main(rank: int, world_size: int, LOCAL_RANK: int, MASTER_ADDR, MASTER_PORT, 
         logger_level:int = args.log_level
         trainer.logger.setLevel(logger_level)
         if args.EVAL_ONLY:
-            trainer.eval(train_iteration=40000)
+            trainer.eval(train_iteration=args.ply_iteration)
         else:
             trainer.train()
     except:

@@ -660,6 +660,7 @@ class Trainer4TreePartition:
 
     def eval(self, train_iteration:int):
         with torch.no_grad():
+            train_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if train_iteration<=0 else train_iteration  
             RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
             # gather SharedGSInfo only once
             _, _, _, _, model2GSInfo = self.forward_SharedGSInfo_dist()
@@ -698,7 +699,7 @@ class Trainer4TreePartition:
                             self.tb_writer.add_images(name + "_view_{}/ground_truth".format(ori_camera.image_name), gt_image[None], global_step=train_iteration)
                         num_samples += 1; psnr_total += PSNR; l1_total += Ll1
                         if self.args.SAVE_EVAL_IMAGE:
-                            torchvision.utils.save_image(image, os.path.join(self.scene.save_img_path, '{}_{}_{}'.format(ori_camera.image_name, iteration, name) + ".png"))
+                            torchvision.utils.save_image(image, os.path.join(self.scene.save_img_path, '{}_{}_{}'.format(name, ori_camera.image_name, train_iteration) + ".png"))
                             torchvision.utils.save_image(gt_image, os.path.join(self.scene.save_gt_path, '{}'.format(ori_camera.image_name) + ".png"))  
                         
                     iteration += len(data)
@@ -710,7 +711,7 @@ class Trainer4TreePartition:
                             idx = ori_camera.uid
                             torchvision.utils.save_image(
                                 local_render[k].render, 
-                                os.path.join(self.scene.save_img_path, '{}_sub_{}'.format(ori_camera.image_name, model_id) + ".png")
+                                os.path.join(self.scene.save_img_path, '{}_{}_{}_sub_{}'.format(name, ori_camera.image_name, train_iteration, model_id) + ".png")
                                 )
                         for k in extra_render:
                             task_id, model_id = k
@@ -718,7 +719,7 @@ class Trainer4TreePartition:
                             idx = ori_camera.uid
                             torchvision.utils.save_image(
                                 extra_render[k].render, 
-                                os.path.join(self.scene.save_img_path, '{}_sub_{}'.format(ori_camera.image_name, model_id) + ".png")
+                                os.path.join(self.scene.save_img_path, '{}_{}_{}_sub_{}'.format(name, ori_camera.image_name, train_iteration, model_id) + ".png")
                             )
                 statistical = torch.tensor([num_samples, psnr_total, l1_total], dtype=torch.float32, device='cuda', requires_grad=False)
                 dist.all_reduce(statistical, op=dist.ReduceOp.SUM, group=None, async_op=False)
