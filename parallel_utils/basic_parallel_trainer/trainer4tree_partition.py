@@ -26,7 +26,7 @@ import parallel_utils.basic_parallel_trainer.task_utils as task_utils
 import parallel_utils.schedulers.basic_scheduler as psb
 import parallel_utils.grid_utils.utils as pgu
 
-from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup, MemoryGaussianModel
 from scene.cameras import Camera, EmptyCamera
 from utils.datasets import CameraListDataset, DatasetRepeater, GroupedItems
 from scene.scene4bounded_gaussian import SceneV3
@@ -58,6 +58,7 @@ class Trainer4TreePartition:
 
         self.SCENE_GRID_SIZE:np.ndarray = args.SCENE_GRID_SIZE
         self.SPLIT_ORDERS: List[int] = args.SPLIT_ORDERS
+        self.WHOLE_MODEL:bool = args.WHOLE_MODEL
         self.ENABLE_REPARTITION:bool = args.ENABLE_REPARTITION
         self.REPARTITION_START_EPOCH:int = args.REPARTITION_START_EPOCH
         self.REPARTITION_END_EPOCH:int = args.REPARTITION_END_EPOCH
@@ -90,11 +91,19 @@ class Trainer4TreePartition:
         self.task_parser = task_utils.BasicTaskParser(self.WORLD_SIZE, self.RANK, self.logger)
         self.scheduler = psb.BasicScheduler(self.logger, self.tb_writer, batch_isend_irecv_version=0, group=self.nccl_group)
         self.scene:SceneV3 = SceneV3(self.mdp, None, shuffle=False)
+        self.whole_model:MemoryGaussianModel = MemoryGaussianModel(sh_degree=self.sh_degree)
         self.train_dataset:CameraListDataset = self.scene.getTrainCameras()
         self.test_dataset:CameraListDataset = self.scene.getTestCameras()
+        self.load_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if ply_iteration<=0 else ply_iteration   
 
+        # read whole model
+        if self.WHOLE_MODEL:
+            self.load_iteration = scene_utils.find_ply_iteration_single_modle(self.scene, self.logger) if ply_iteration<=0 else ply_iteration    
+        if self.RANK == 0 and self.WHOLE_MODEL:                     
+            print("WHOLE_MODEL load_iteration", self.load_iteration)            
+            self.whole_model.load_ply(os.path.join(os.path.dirname(self.scene.model_path), "point_cloud", "iteration_"+str(self.load_iteration),"point_cloud.ply"))
         # after set dataset, need it to set some opt
-        self.init_grid_bvhTree_gsmodels(ply_iteration)
+        self.init_grid_bvhTree_gsmodels(self.load_iteration)
         # self.start_iteration = load_iteration
         # self.scene_3d_grid, self.path2bvh_nodes, self.sorted_leaf_nodes = scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes
         # self.gaussians_group = gaussians_group
@@ -137,10 +146,17 @@ class Trainer4TreePartition:
 
     def init_grid_bvhTree_gsmodels(self, ply_iteration:int):
         # load or init scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes
-        load_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if ply_iteration<=0 else ply_iteration  
+        load_iteration = ply_iteration  
         if load_iteration > 0:
-            # load exisiting log
-            scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist(self.scene, load_iteration, self.SCENE_GRID_SIZE, self.logger)
+            # load exisiting model
+            # use whole model
+            if self.WHOLE_MODEL:
+                scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist_whole_model(
+                    self.scene, self.SCENE_GRID_SIZE, self.bvh_depth, load=None, position=self.whole_model.xyz, 
+                    SPLIT_ORDERS=self.SPLIT_ORDERS, pre_load_grid=None, conflict={}, logger=self.logger)
+            # use split model
+            else:                
+                scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist(self.scene, load_iteration, self.SCENE_GRID_SIZE, self.logger)
         else: 
             scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.init_BvhTree_on_3DGrid_dist(
                 self.scene, self.SCENE_GRID_SIZE, self.bvh_depth, load=None, position=self.scene.point_cloud.points, 
@@ -173,7 +189,11 @@ class Trainer4TreePartition:
             gaussians_group.training_setup(self.opt)   
         else:
             # load gs and optimizer
-            gs_utils.load_gs_from_ply(self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)
+            if self.WHOLE_MODEL:
+                print("load WHOLE_MODEL")
+                gs_utils.load_gs_from_single_ply(self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)                
+            else:
+                gs_utils.load_gs_from_ply(self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)                
         del self.scene.point_cloud
         self.logger.info('models are initialized:' + gaussians_group.get_info())
 

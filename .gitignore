@@ -19,6 +19,7 @@ scripts/
 track/
 tsdf/
 release/
+shared_memory_test.py
 
 !scripts/colmap_complete_process.sh
 !scripts/colmap_mill19_with_known_pose.sh

@@ -66,6 +66,16 @@ def init_BvhTreeNode_Rank0(scene_3d_grid:pgu.Grid3DSpace, bvh_depth:int, load:np
 
     return path2bvh_nodes, sorted_leaf_nodes
 
+def load_BvhTree_on_3DGrid_dist_whole_model(scene:SceneV3, SCENE_GRID_SIZE:List[int], bvh_depth:int, load:np.ndarray, position:np.ndarray, SPLIT_ORDERS:list, pre_load_grid:np.ndarray, conflict:Dict[str, pgu.BvhTreeNodeon3DGrid], logger:logging.Logger):
+    RANK = dist.get_rank()
+    scene_3d_grid = init_grid_dist(scene, SCENE_GRID_SIZE)
+    path2bvh_nodes, sorted_leaf_nodes = None, None
+    if RANK == 0:
+        path2bvh_nodes, sorted_leaf_nodes = init_BvhTreeNode_Rank0(scene_3d_grid, bvh_depth, load, position, SPLIT_ORDERS, pre_load_grid, conflict, logger)
+    
+    return scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes
+
+
 def init_BvhTree_on_3DGrid_dist(scene:SceneV3, SCENE_GRID_SIZE:List[int], bvh_depth:int, load:np.ndarray, position:np.ndarray, SPLIT_ORDERS:list, pre_load_grid:np.ndarray, conflict:Dict[str, pgu.BvhTreeNodeon3DGrid], logger:logging.Logger):
     RANK = dist.get_rank()
     scene_3d_grid = init_grid_dist(scene, SCENE_GRID_SIZE)
@@ -327,6 +337,19 @@ def get_camera_model_relation_dist(ckpt:str, camera_list:CameraListDataset, NUM_
         dist.broadcast(relation_tensor, src=0, group=None, async_op=False)
     torch.cuda.synchronize()
     return relation_tensor.cpu()
+
+def find_ply_iteration_single_modle(scene:SceneV3, logger:logging.Logger):
+    model_path = os.path.dirname(scene.model_path)
+    point_cloud_path = os.path.join(model_path, "point_cloud/iteration_*")
+    all_ckpt_dir = glob.glob(point_cloud_path)
+    try:
+        all_ply_iteration = [int(os.path.basename(path).split('_')[-1]) for path in all_ckpt_dir]
+        final_iteration = max(all_ply_iteration)
+        logger.info('find ckpt at iteration {}'.format(final_iteration))
+    except:
+        final_iteration = 0
+        logger.info('can not find ckpt')    
+    return final_iteration
 
 def find_ply_iteration(scene:SceneV3, logger:logging.Logger):
     model_path = scene.model_path
