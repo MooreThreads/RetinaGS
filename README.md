@@ -30,8 +30,11 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 ## Usage
 
-### Evaluation
+### Download Data and Pretrained Model
+
 Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). 把data_Garden放到data/下，model_Garden放到model/下.
+
+### Evaluation
 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
@@ -41,7 +44,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
         -r 1 --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用原始仓库训练的模型可以直接跑（替换-s和-m即可）. 
+Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑（替换-s和-m即可）. 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
 Arguments of 3DGS我们大部分保留. 
@@ -65,7 +68,7 @@ Arguments of 3DGS我们大部分保留.
   #### --WHOLE_MODEL
   仅读入单个ply
   #### --max_batch_size --max_load 
-  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case.
+  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 当显存不够时，请尝试降低这两个值.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
   仅进行Evaluation，且保存图像和每个submodel输出的子图像。
 
@@ -79,20 +82,20 @@ For single machine, an example of using default densification strategy and Colma
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
-    train_MP_tree.py -s path/2/data \
-        -m path/2/model --bvh_depth 2 \
+    main_MP_tree.py -s data/data_Garden \
+        -m model/model_Garden_default_densification --bvh_depth 2 \
         --eval \
         --epochs 187 \
         --max_batch_size 4  --max_load 8
 ```
 
 
-从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式)
+For single machine, 从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式).
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
-    train_MP_tree.py -s path/2/data \
-        -m path/2/model --bvh_depth 2 \
+    main_MP_tree.py -s data/data_Garden \
+        -m model/model_Garden_MVS --bvh_depth 2 \
         --eval \
         --epochs 187 \
         --max_batch_size 4  --max_load 8  \
@@ -106,22 +109,21 @@ For multiple nodes, start command on each node with corresponding parameters, an
 
 ### Model Zoo
 
-| Datasets                                                      | PSNR | #GS   |
+| Data and Model                                                | PSNR | #GS   |
 |:-----------------:                                            |:----:|:-----:|
-| [[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/)       |27.74 |62.94M |
-| [[Garden-full]](https://ai-reality.github.io/RetinaGS/)       |27.06 |62.94M |
+| [[Bicycle-1.6k]](https://ai-reality.github.io/RetinaGS/)      |27.74 |62.94M |
+| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |27.06 |62.94M |
 | [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |
-| [[MatrixCity-M]](https://ai-reality.github.io/RetinaGS/)      |31.12 |62.18M |
-| [[Mega-NeRF]](https://ai-reality.github.io/RetinaGS/)         |25.09 |27.9M  |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |
 
-M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results.
+M means Million.
 
 ## To Do
 - Output as one whole model  
 - 优化读入单独ply（send recv形式）
-- Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
+- More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
 - Colmap MVS脚本
+- 加上指定iteration的训练
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
