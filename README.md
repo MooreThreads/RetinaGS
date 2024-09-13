@@ -133,14 +133,14 @@ For multiple machines, start command on each node with corresponding parameters,
 
 ### Model Zoo
 
-| Data and Model                                                | PSNR | #GS   |
-|:-----------------:                                            |:----:|:-----:|
-| [[Bicycle-1.6k]](https://ai-reality.github.io/RetinaGS/)      |25.41 |31.67M |
-| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |
-| [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |
-| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |
+| Data and Model                                                | PSNR | #GS   |resolution|
+|:-----------------:                                            |:----:|:-----:|:-----:   |
+| [[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/)       |27.74 |62.94M |1600×1036 |
+| [[Bicycle]](https://ai-reality.github.io/RetinaGS/)           |24.86 |31.67M |4944×3284 |
+| [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |8408×5944 |
+| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
 
--1.6k and -full mean 1.6k resolution and full resolution. M means Million.
+M means Million.
 
 ## To Do
 - Output as one whole model  
