@@ -107,7 +107,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
 ```
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
+<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
 Arguments of 3DGS我们大部分保留. 
 
   #### --epochs
@@ -144,12 +144,11 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million.
 
 ## To Do
-- 加上指定iteration的训练
 - Output as one whole model  
+- 加上指定iteration的训练
 - 优化读入单独ply（send recv形式）
-- More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
 - Colmap MVS脚本
-
+- More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
