@@ -104,13 +104,16 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
+
 Arguments of 3DGS我们大部分保留. 
 
+MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
+
   #### --WHOLE_MODEL
-  输出单独ply文件
+  输出单独ply文件，当GS数量过多时，可以考虑不加该flag以提升读取和写入速度.
 
   #### --epochs
-  指定训练epoch数量
+  指定训练epoch数量.
   
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, ```0.00016``` and ```0.0000016``` by default.
@@ -143,13 +146,14 @@ M means Million.
 
 ## To Do
 - Output as one whole model  
-- 加上指定iteration的训练
 - 优化读入单独ply（send recv形式）
-- Colmap MVS脚本
-- More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
+- 加上指定iteration的训练
+- Model Zoo的准备和描述
+- Colmap MVS脚本 + 说明
 - 支持Evaluation输出LPIPS和SSIM
 - 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 - 说明MatrixCity-Aerial的下载和推理
+- 清理多余文件
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
