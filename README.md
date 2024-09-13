@@ -78,7 +78,7 @@ Arguments of 3DGS我们大部分保留.
 
 
 
-### Training 
+### Single Machine Training 
 For single machine, an example of using default densification strategy and Colmap Initialization  command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
@@ -102,11 +102,35 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
         --max_batch_size 4  --max_load 8  \
         --position_lr_init 0.0000016 \
         --position_lr_final 0.000000016 \
-        --densify_until_epoch 0 \
+        --densify_until_iter 0 \
         --points3D MVS_points3D --pointcloud_sample_rate 1
 ```
 
-For multiple nodes, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
+<details>
+<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
+Arguments of 3DGS我们大部分保留. 
+
+  #### --epochs
+  指定训练epoch数量
+  
+  #### --position_lr_init --position_lr_final
+  Initial and Final 3D position learning rate, ```0.00016``` and ```0.0000016``` by default.
+
+  #### --densify_until_iter
+  Iteration where densification stops, ```15000``` by default and ```0``` for abandon.
+
+  #### --points3D
+  指定初始化使用的点云文件
+
+  #### --pointcloud_sample_rate
+  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当显存不够时可以考虑自定义该值。
+
+</details>
+<br>
+
+### Multiple Machines Training 
+
+For multiple machines, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
 
 ### Model Zoo
 
@@ -120,11 +144,12 @@ For multiple nodes, start command on each node with corresponding parameters, an
 M means Million.
 
 ## To Do
+- 加上指定iteration的训练
 - Output as one whole model  
 - 优化读入单独ply（send recv形式）
 - More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
 - Colmap MVS脚本
-- 加上指定iteration的训练
+
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
