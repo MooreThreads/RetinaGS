@@ -41,7 +41,8 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
     main_MP_tree.py -s data/data_Garden -m model/model_Garden \
         --bvh_depth 2 --WHOLE_MODEL \
         --max_batch_size 4  --max_load 8  \
-        -r 1 --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
+        -r 1 --eval \
+        --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
 Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑（替换-s和-m即可）. 
@@ -64,7 +65,7 @@ Arguments of 3DGS我们大部分保留.
   #### --eval
   Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --bvh_depth
-  Argument for controlling the number of submodels. Here, you would create 2**(bvh_depth) submodels for 2 GPUs, namely 2 submodels for each GPU. 
+  Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
   #### --WHOLE_MODEL
   仅读入单个ply
   #### --max_batch_size --max_load 
@@ -90,7 +91,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
 ```
 
 
-For single machine, 从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式).
+For single machine, an example of 从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式) command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
     --master_addr=127.0.0.1 --master_port=7356 \
