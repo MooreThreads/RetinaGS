@@ -81,34 +81,33 @@ Arguments of 3DGS我们大部分保留.
 ### Single Machine Training 
 For single machine, an example of using default densification strategy and Colmap Initialization  command is:
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
-    --master_addr=127.0.0.1 --master_port=7356 \
-    main_MP_tree.py -s data/data_Garden \
-        -m model/model_Garden_default_densification --bvh_depth 2 \
-        --eval \
-        --epochs 187 \
-        --max_batch_size 4  --max_load 8
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
+    main_MP_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
+        --bvh_depth 2 --WHOLE_MODEL \
+        --max_batch_size 4  --max_load 8 \
+        -r 1 --eval \
+        --epochs 187
 ```
 
 
 For single machine, an example of 从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式) command is:
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 \
-    --master_addr=127.0.0.1 --master_port=7356 \
-    main_MP_tree.py -s data/data_Garden \
-        -m model/model_Garden_MVS --bvh_depth 2 \
-        --eval \
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
+    main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
+        --bvh_depth 2 --WHOLE_MODEL \
+        --max_batch_size 4  --max_load 8 \
+        -r 1 --eval \
         --epochs 187 \
-        --max_batch_size 4  --max_load 8  \
-        --position_lr_init 0.0000016 \
-        --position_lr_final 0.000000016 \
-        --densify_until_iter 0 \
-        --points3D MVS_points3D --pointcloud_sample_rate 1
+        --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
+        --points3D MVS_points3D --pointcloud_sample_rate 1        
 ```
 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
 Arguments of 3DGS我们大部分保留. 
+
+  #### --WHOLE_MODEL
+  输出单独ply文件
 
   #### --epochs
   指定训练epoch数量
@@ -120,10 +119,10 @@ Arguments of 3DGS我们大部分保留.
   Iteration where densification stops, ```15000``` by default and ```0``` for abandon.
 
   #### --points3D
-  指定初始化使用的点云文件
+  指定初始化使用的点云文件.
 
   #### --pointcloud_sample_rate
-  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当显存不够时可以考虑自定义该值。
+  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当显存不够时可以考虑自定义该值.
 
 </details>
 <br>
