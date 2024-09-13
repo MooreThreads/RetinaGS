@@ -135,12 +135,12 @@ For multiple machines, start command on each node with corresponding parameters,
 
 | Data and Model                                                | PSNR | #GS   |
 |:-----------------:                                            |:----:|:-----:|
-| [[Bicycle-1.6k]](https://ai-reality.github.io/RetinaGS/)      |27.74 |62.94M |
-| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |27.06 |62.94M |
+| [[Bicycle-1.6k]](https://ai-reality.github.io/RetinaGS/)      |25.41 |31.67M |
+| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |
 | [[ScanNet++]](https://ai-reality.github.io/RetinaGS/)         |29.71 |47.59M |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |
 
-M means Million.
+-1.6k and -full mean 1.6k resolution and full resolution. M means Million.
 
 ## To Do
 - Output as one whole model  
@@ -148,6 +148,7 @@ M means Million.
 - 优化读入单独ply（send recv形式）
 - Colmap MVS脚本
 - More Model Zoo（引导用户下载官方数据，再把包括MVS结果在内的colmap放到里面）
+- 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
