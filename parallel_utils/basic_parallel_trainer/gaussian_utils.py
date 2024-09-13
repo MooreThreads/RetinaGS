@@ -134,9 +134,9 @@ def load_gs_from_single_ply(opt, gaussians_group:BoundedGaussianModelGroup, loca
         
         _gau.training_setup(opt)
 
-        _gau.discard_gs_out_range()
-        print('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0]))
-        logger.info('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0])) 
+        # _gau.discard_gs_out_range()
+        # print('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0]))
+        # logger.info('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0])) 
 
         # build optimizer
         

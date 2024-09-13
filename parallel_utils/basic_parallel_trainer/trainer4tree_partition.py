@@ -94,6 +94,7 @@ class Trainer4TreePartition:
         self.whole_model:MemoryGaussianModel = MemoryGaussianModel(sh_degree=self.sh_degree)
         self.train_dataset:CameraListDataset = self.scene.getTrainCameras()
         self.test_dataset:CameraListDataset = self.scene.getTestCameras()
+        self.ply_iteration = ply_iteration
         self.load_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if ply_iteration<=0 else ply_iteration   
 
         # read whole model
@@ -680,7 +681,10 @@ class Trainer4TreePartition:
 
     def eval(self, train_iteration:int):
         with torch.no_grad():
-            train_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if train_iteration<=0 else train_iteration  
+            train_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if train_iteration<=0 else train_iteration
+            if self.WHOLE_MODEL:
+                self.load_iteration = scene_utils.find_ply_iteration_single_modle(self.scene, self.logger) if self.ply_iteration<=0 else self.ply_iteration
+              
             RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
             # gather SharedGSInfo only once
             _, _, _, _, model2GSInfo = self.forward_SharedGSInfo_dist()

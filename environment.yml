@@ -1,4 +1,4 @@
-name: gaussian_splatting
+name: retina_gs
 channels:
   - pytorch
   - conda-forge
@@ -12,6 +12,10 @@ dependencies:
   - torchaudio=0.12.1
   - torchvision=0.13.1
   - tqdm
+  - numba 
+  - opencv-python 
+  - scipy
   - pip:
     - submodules/diff-gaussian-rasterization
     - submodules/simple-knn
+    - rasterization_kernels/diff-gaussian-rasterization-half-gaussian
