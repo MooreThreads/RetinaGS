@@ -146,6 +146,7 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 
 ## To Do
 - [ ] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集）
+- [ ] 统一evaluation输出到外层
 - [ ] 加上指定iteration的训练
 - [ ] 支持Evaluation输出LPIPS和SSIM
 - [ ] Model Zoo的准备和描述
