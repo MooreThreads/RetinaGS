@@ -38,7 +38,7 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
-    main_MP_tree.py -s data/data_Garden -m model/model_Garden \
+    main_mp_tree.py -s data/data_Garden -m model/model_Garden \
         --bvh_depth 2 --WHOLE_MODEL \
         --max_batch_size 4  --max_load 8  \
         -r 1 --eval \
@@ -82,7 +82,7 @@ Arguments of 3DGS我们大部分保留.
 For single machine, an example of using default densification strategy and Colmap Initialization  command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
-    main_MP_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
+    main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
         --bvh_depth 2 --WHOLE_MODEL \
         --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
@@ -125,7 +125,7 @@ MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
   指定初始化使用的点云文件.
 
   #### --pointcloud_sample_rate
-  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当显存不够时可以考虑自定义该值.
+  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当采用MVS初始化训练，显存不够时可以考虑增加降采样比例.
 
 </details>
 <br>
@@ -138,19 +138,20 @@ For multiple machines, start command on each node with corresponding parameters,
 
 | Data and Model                                                | PSNR | #GS   |resolution|
 |:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Garden-1.6k]](https://ai-reality.github.io/RetinaGS/)       |27.74 |62.94M |1600×1036 |
+| [[Room-1.6k]](https://ai-reality.github.io/RetinaGS/)         |32.86 |22.41M |1600×1036 |
 | [[Bicycle]](https://ai-reality.github.io/RetinaGS/)           |24.86 |31.67M |4944×3284 |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
 
-M means Million.
+M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
 - [ ] Output as one whole model  
 - [ ] 优化读入单独ply（send recv形式）
 - [ ] 加上指定iteration的训练
-- [ ] 更多训练参数描述
-- [ ] Model Zoo的准备和描述
 - [ ] 支持Evaluation输出LPIPS和SSIM
+- [ ] data_Garden
+- [ ] Model Zoo的准备和描述
+- [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件

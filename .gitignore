@@ -19,6 +19,8 @@ scripts/
 track/
 tsdf/
 release/
+data/
+model/
 shared_memory_test.py
 
 !scripts/colmap_complete_process.sh
