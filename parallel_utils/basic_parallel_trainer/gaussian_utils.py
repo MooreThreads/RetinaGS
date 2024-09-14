@@ -132,13 +132,13 @@ def load_gs_from_single_ply(opt, gaussians_group:BoundedGaussianModelGroup, loca
         _gau.spatial_lr_scale = scene.cameras_extent 
         logger.info('set _gau.spatial_lr_scale as {}'.format(_gau.spatial_lr_scale))
         
+        # build optimizer        
         _gau.training_setup(opt)
 
-        # _gau.discard_gs_out_range()
-        # print('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0]))
-        # logger.info('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0])) 
+        _gau.discard_gs_out_range()
+        print('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0]))
+        logger.info('model {} has {} gs after discard_gs_out_range'.format(mid, _gau._xyz.shape[0])) 
 
-        # build optimizer
         
     gaussians_group.set_SHdegree(load_iteration//1000)   
         

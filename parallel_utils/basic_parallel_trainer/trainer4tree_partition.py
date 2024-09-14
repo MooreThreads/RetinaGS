@@ -665,7 +665,12 @@ class Trainer4TreePartition:
             # end of epoch
             with torch.no_grad():
                 if (i_epoch % self.SAVE_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):
-                    scene_utils.save_BvhTree_on_3DGrid(self.checkpoint_cleaner, iteration, self.scene.model_path, self.gaussians_group, self.path2bvh_nodes)
+                    scene_utils.save_BvhTree_on_3DGrid(self.checkpoint_cleaner, iteration, self.scene.model_path, self.gaussians_group, self.path2bvh_nodes)                    
+                if RANK == 0 and self.WHOLE_MODEL and i_epoch == (NUM_EPOCH-1):
+                    # shengyi: just merge all models, do it in RAM to avoid OOM of GPU.
+                    # this naive implementation make sense when --SHRAE_GS_INFO flag is turned on.
+                    whole_ply = MemoryGaussianModel(sh_degree=self.sh_degree)
+                    whole_ply.save_whole_model(path=self.scene.model_path, iteration=iteration)
                 if self.ENABLE_REPARTITION and (i_epoch%self.REPARTITION_INTERVAL_EPOCH==0) and (self.REPARTITION_START_EPOCH<=i_epoch <=self.REPARTITION_END_EPOCH):
                     # burning: I don't think resplit scene is cool, it can easily cause OOM
                     # this naive implementation works if memeory is always enough

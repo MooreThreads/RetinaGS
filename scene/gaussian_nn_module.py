@@ -842,6 +842,98 @@ class MemoryGaussianModel():
         self.features_extra = None
         self.scales = None
         self.rots = None
+        
+    def construct_list_of_attributes(self):
+        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        # All channels except the 3 DC
+        for i in range(self.features_dc.shape[1]*self.features_dc.shape[2]):
+            l.append('f_dc_{}'.format(i))
+        for i in range(self.features_extra.shape[1]*self.features_extra.shape[2]):
+            l.append('f_rest_{}'.format(i))
+        l.append('opacity')
+        for i in range(self.scales.shape[1]):
+            l.append('scale_{}'.format(i))
+        for i in range(self.rots.shape[1]):
+            l.append('rot_{}'.format(i))
+        return l
+    
+    def save_whole_model(self, path, iteration):
+        # Initialization
+        self.xyz = np.empty((0, 3), dtype=np.float32)
+        self.opacities = np.empty((0, 1), dtype=np.float32)
+        self.features_dc = np.empty((0, 3, 1), dtype=np.float32)
+        self.features_extra = np.empty((0, 3, (self.sh_degree + 1) ** 2 - 1), dtype=np.float32)
+        self.scales = np.empty((0, 3), dtype=np.float32)
+        self.rots = np.empty((0, 4), dtype=np.float32)
+        
+        # Per rank read
+        for item in os.listdir(path):
+            rank_floder = os.path.join(path, item)
+            if os.path.isdir(rank_floder) and item.startswith("rank_"):
+                ply_floder_path = os.path.join(rank_floder, "point_cloud", "iteration_"+str(iteration))
+                for ply_item in os.listdir(ply_floder_path):
+                    if ply_item.startswith("point_cloud_"):
+                        ply_path = os.path.join(ply_floder_path, ply_item)
+                        plydata = PlyData.read(ply_path)
+
+                        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
+                                        np.asarray(plydata.elements[0]["y"]),
+                                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+                        
+                        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+                        features_dc = np.zeros((xyz.shape[0], 3, 1))
+                        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+                        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+                        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+                        print("shape of features_dc", features_dc.shape)
+
+                        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+                        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+                        assert len(extra_f_names)==3*(self.sh_degree + 1) ** 2 - 3
+                        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+                        for idx, attr_name in enumerate(extra_f_names):
+                            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+                        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+                        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
+                        print("shape of features_extra", features_extra.shape)
+                        
+
+                        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+                        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+                        scales = np.zeros((xyz.shape[0], len(scale_names)))
+                        for idx, attr_name in enumerate(scale_names):
+                            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+                        print("add", item, ": number", xyz.shape[0])
+                        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+                        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+                        rots = np.zeros((xyz.shape[0], len(rot_names)))
+                        for idx, attr_name in enumerate(rot_names):
+                            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+                        self.xyz = np.concatenate((self.xyz, xyz.astype(np.float32)), axis=0)
+                        self.opacities = np.concatenate((self.opacities, opacities.astype(np.float32)), axis=0)
+                        self.features_dc = np.concatenate((self.features_dc, features_dc.astype(np.float32)), axis=0)
+                        self.features_extra = np.concatenate((self.features_extra, features_extra.astype(np.float32)), axis=0)
+                        self.scales = np.concatenate((self.scales, scales.astype(np.float32)), axis=0)
+                        self.rots = np.concatenate((self.rots, rots.astype(np.float32)), axis=0)
+                        print("total: number", self.xyz.shape[0])
+                
+                
+        # save
+        save_path = os.path.join(path, "point_cloud", "iteration_"+str(iteration), "point_cloud.ply")
+        mkdir_p(os.path.dirname(save_path))
+        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+        normals = np.zeros_like(self.xyz)
+        # self.features_dc = np.transpose(self.features_dc, (0, 2, 1))
+        self.features_dc = self.features_dc.reshape(self.features_dc.shape[0], -1)
+        # self.features_extra = np.transpose(self.features_extra, (0, 2, 1))
+        self.features_extra = self.features_extra.reshape(self.features_extra.shape[0], -1)        
+        attributes = np.concatenate((self.xyz, normals, self.features_dc, self.features_extra, self.opacities, self.scales, self.rots), axis=1).conjugate()
+        elements = np.frombuffer(attributes.tobytes(), dtype=dtype_full)
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(save_path)
     
     def load_ply(self, path):
         plydata = PlyData.read(path)

@@ -145,18 +145,19 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] Output as one whole model  
-- [ ] 优化读入单独ply（send recv形式）
+- [ ] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集）
 - [ ] 加上指定iteration的训练
 - [ ] 支持Evaluation输出LPIPS和SSIM
-- [ ] data_Garden
 - [ ] Model Zoo的准备和描述
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件
 - [ ] 1.6k输出时多余提示
+- [x] data_Garden_MVS（降采样4倍Graden，作为示例）
+- [x] Output as one whole model（不加shared GS，边界面会出问题）
 - [x] Colmap MVS脚本 + 说明
+- [x] 读入单独ply（无shared GS）
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
