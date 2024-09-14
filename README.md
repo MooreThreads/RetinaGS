@@ -145,15 +145,17 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million.
 
 ## To Do
-- Output as one whole model  
-- 优化读入单独ply（send recv形式）
-- 加上指定iteration的训练
-- Model Zoo的准备和描述
-- Colmap MVS脚本 + 说明
-- 支持Evaluation输出LPIPS和SSIM
-- 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
-- 说明MatrixCity-Aerial的下载和推理
-- 清理多余文件
+- [ ] Output as one whole model  
+- [ ] 优化读入单独ply（send recv形式）
+- [ ] 加上指定iteration的训练
+- [ ] 更多训练参数描述
+- [ ] Model Zoo的准备和描述
+- [ ] 支持Evaluation输出LPIPS和SSIM
+- [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
+- [ ] 说明MatrixCity-Aerial的下载和推理
+- [ ] 清理多余文件
+- [ ] 1.6k输出时多余提示
+- [x] Colmap MVS脚本 + 说明
 
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
