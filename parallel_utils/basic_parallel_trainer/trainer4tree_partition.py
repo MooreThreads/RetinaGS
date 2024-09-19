@@ -100,7 +100,7 @@ class Trainer4TreePartition:
         # read whole model
         if self.WHOLE_MODEL:
             self.load_iteration = scene_utils.find_ply_iteration_single_modle(self.scene, self.logger) if ply_iteration<=0 else ply_iteration    
-        if self.RANK == 0 and self.WHOLE_MODEL:                     
+        if self.RANK == 0 and self.load_iteration > 0 and self.WHOLE_MODEL:                     
             print("WHOLE_MODEL load_iteration", self.load_iteration)            
             self.whole_model.load_ply(os.path.join(os.path.dirname(self.scene.model_path), "point_cloud", "iteration_"+str(self.load_iteration),"point_cloud.ply"))
         # after set dataset, need it to set some opt
@@ -664,18 +664,18 @@ class Trainer4TreePartition:
     
             # end of epoch
             with torch.no_grad():
-                if (i_epoch % self.SAVE_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):
+                if (i_epoch % self.SAVE_INTERVAL_EPOCH == 0 and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):
                     scene_utils.save_BvhTree_on_3DGrid(self.checkpoint_cleaner, iteration, self.scene.model_path, self.gaussians_group, self.path2bvh_nodes)                    
                 if RANK == 0 and self.WHOLE_MODEL and i_epoch == (NUM_EPOCH-1):
-                    # shengyi: just merge all models, do it in RAM to avoid OOM of GPU.
-                    # this naive implementation make sense when --SHRAE_GS_INFO flag is turned on.
+                    # shengyi: just merge all models, do it in RAM to avoid OOM of GPU
+                    # this naive implementation make sense when --SHRAE_GS_INFO flag is turned on
                     whole_ply = MemoryGaussianModel(sh_degree=self.sh_degree)
-                    whole_ply.save_whole_model(path=self.scene.model_path, iteration=iteration)
+                    whole_ply.save_whole_model(path=os.path.dirname(self.scene.model_path), iteration=iteration)
                 if self.ENABLE_REPARTITION and (i_epoch%self.REPARTITION_INTERVAL_EPOCH==0) and (self.REPARTITION_START_EPOCH<=i_epoch <=self.REPARTITION_END_EPOCH):
                     # burning: I don't think resplit scene is cool, it can easily cause OOM
                     # this naive implementation works if memeory is always enough
                     self.resplit_grid_bvhTree_gsmodels(iteration=iteration)
-                if (i_epoch % self.EVAL_INTERVAL_EPOCH == 0) or (i_epoch == (NUM_EPOCH-1)):  
+                if (i_epoch % self.EVAL_INTERVAL_EPOCH == 0  and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):  
                     torch.cuda.empty_cache()  
                     self.logger.info('eval after epoch {}'.format(i_epoch))
                     self.eval(train_iteration=iteration)

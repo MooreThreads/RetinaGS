@@ -145,7 +145,7 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集）
+- [ ] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集，如果效果合理，强制Guide用户使用）
 - [ ] 统一evaluation输出到外层
 - [ ] 加上指定iteration的训练
 - [ ] 支持Evaluation输出LPIPS和SSIM
@@ -155,6 +155,7 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件
 - [ ] 1.6k输出时多余提示
+- [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近）
 - [x] data_Garden_MVS（降采样4倍Graden，作为示例）
 - [x] Output as one whole model（不加shared GS，边界面会出问题）
 - [x] Colmap MVS脚本 + 说明
