@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
         --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑（替换-s和-m即可）. 
+Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑Evaluation（替换-s和-m即可）. 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
 Arguments of 3DGS我们大部分保留. 
@@ -148,7 +148,7 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集，如果效果合理，强制Guide用户使用）
+- [ ] 使用--SPLIT_MODEL代替--WHOLE_MODEL
 - [ ] 统一evaluation输出到外层
 - [ ] 加上指定iteration的训练
 - [ ] 支持Evaluation输出LPIPS和SSIM
@@ -158,10 +158,11 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件
 - [ ] 1.6k输出时多余提示
+- [x] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集，可达到无损，强制Guide用户使用）
 - [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近，可近乎无损合并+重新分割）
 - [x] data_Garden_MVS（降采样4倍Graden，作为示例）
 - [x] Output as one whole model（不加shared GS，边界面会出问题）
-- [x] Colmap MVS脚本 + 说明
+- [x] Colmap MVS脚本 + 测试 + 说明
 - [x] 读入单独ply（无shared GS）
 
 ## Citation

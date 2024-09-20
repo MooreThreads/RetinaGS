@@ -10,6 +10,7 @@
 #
 
 import torch, math
+import torch.distributed
 import numpy as np
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
 from torch import nn
@@ -23,7 +24,281 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_renderer.render import render4GaussianModel2
 from gaussian_renderer.render_half_gs import render4BoundedGaussianModel
 from scene.cameras import Camera, Patch
+import parallel_utils.grid_utils.utils as pgu
+import torch.distributed as dist
 
+class MemoryGaussianModel():
+    def __init__(self, sh_degree: int, max_size:int=None):
+        self.sh_degree = sh_degree
+        self.max_size = max_size
+        self.xyz = None
+        self.opacities = None
+        self.features_dc = None
+        self.features_extra = None
+        self.scales = None
+        self.rots = None
+        self.ops = None
+        self.gs_submodel_id = None
+        self.num_gs_rank = None
+        
+    def construct_list_of_attributes(self):
+        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
+        # All channels except the 3 DC
+        for i in range(self.features_dc.shape[1]*self.features_dc.shape[2]):
+            l.append('f_dc_{}'.format(i))
+        for i in range(self.features_extra.shape[1]*self.features_extra.shape[2]):
+            l.append('f_rest_{}'.format(i))
+        l.append('opacity')
+        for i in range(self.scales.shape[1]):
+            l.append('scale_{}'.format(i))
+        for i in range(self.rots.shape[1]):
+            l.append('rot_{}'.format(i))
+        return l
+    
+    def save_whole_model(self, path, iteration):
+        # Initialization
+        self.xyz = np.empty((0, 3), dtype=np.float32)
+        self.opacities = np.empty((0, 1), dtype=np.float32)
+        self.features_dc = np.empty((0, 3, 1), dtype=np.float32)
+        self.features_extra = np.empty((0, 3, (self.sh_degree + 1) ** 2 - 1), dtype=np.float32)
+        self.scales = np.empty((0, 3), dtype=np.float32)
+        self.rots = np.empty((0, 4), dtype=np.float32)
+        
+        # Per model read
+        for item in os.listdir(path):
+            rank_floder = os.path.join(path, item)
+            if os.path.isdir(rank_floder) and item.startswith("rank_"):
+                ply_floder_path = os.path.join(rank_floder, "point_cloud", "iteration_"+str(iteration))
+                for ply_item in os.listdir(ply_floder_path):
+                    if ply_item.startswith("point_cloud_"):
+                        ply_path = os.path.join(ply_floder_path, ply_item)
+                        plydata = PlyData.read(ply_path)
+
+                        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
+                                        np.asarray(plydata.elements[0]["y"]),
+                                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+                        
+                        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+                        features_dc = np.zeros((xyz.shape[0], 3, 1))
+                        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+                        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+                        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+                        print("shape of features_dc", features_dc.shape)
+
+                        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+                        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+                        assert len(extra_f_names)==3*(self.sh_degree + 1) ** 2 - 3
+                        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+                        for idx, attr_name in enumerate(extra_f_names):
+                            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+                        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+                        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
+                        print("shape of features_extra", features_extra.shape)
+                        
+
+                        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+                        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+                        scales = np.zeros((xyz.shape[0], len(scale_names)))
+                        for idx, attr_name in enumerate(scale_names):
+                            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+                        print("add", item, ": number", xyz.shape[0])
+                        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+                        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+                        rots = np.zeros((xyz.shape[0], len(rot_names)))
+                        for idx, attr_name in enumerate(rot_names):
+                            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+                        self.xyz = np.concatenate((self.xyz, xyz.astype(np.float32)), axis=0)
+                        self.opacities = np.concatenate((self.opacities, opacities.astype(np.float32)), axis=0)
+                        self.features_dc = np.concatenate((self.features_dc, features_dc.astype(np.float32)), axis=0)
+                        self.features_extra = np.concatenate((self.features_extra, features_extra.astype(np.float32)), axis=0)
+                        self.scales = np.concatenate((self.scales, scales.astype(np.float32)), axis=0)
+                        self.rots = np.concatenate((self.rots, rots.astype(np.float32)), axis=0)
+                        print("total: number", self.xyz.shape[0])
+                
+                
+        # save
+        save_path = os.path.join(path, "point_cloud", "iteration_"+str(iteration), "point_cloud.ply")
+        mkdir_p(os.path.dirname(save_path))
+        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+        normals = np.zeros_like(self.xyz)
+        # self.features_dc = np.transpose(self.features_dc, (0, 2, 1))
+        self.features_dc = self.features_dc.reshape(self.features_dc.shape[0], -1)
+        # self.features_extra = np.transpose(self.features_extra, (0, 2, 1))
+        self.features_extra = self.features_extra.reshape(self.features_extra.shape[0], -1)        
+        attributes = np.concatenate((self.xyz, normals, self.features_dc, self.features_extra, self.opacities, self.scales, self.rots), axis=1).conjugate()
+        elements = np.frombuffer(attributes.tobytes(), dtype=dtype_full)
+        el = PlyElement.describe(elements, 'vertex')
+        PlyData([el]).write(save_path)
+    
+    def load_ply(self, path):
+        plydata = PlyData.read(path)
+
+        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        features_dc = np.zeros((xyz.shape[0], 3, 1))
+        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(self.sh_degree + 1) ** 2 - 3
+        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
+
+        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        scales = np.zeros((xyz.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        rots = np.zeros((xyz.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        
+        print("MemoryGaussianModel size:", xyz.shape[0])
+        self.xyz = xyz.astype(np.float32)
+        self.opacities = opacities.astype(np.float32)
+        self.features_dc = features_dc.astype(np.float32)
+        self.features_extra = features_extra.astype(np.float32)
+        self.scales = scales.astype(np.float32)
+        self.rots = rots.astype(np.float32)
+
+    def gs_in_range(self, model_id2box, model_id2rank, scene_3d_grid, WORLD_SIZE):
+        self.gs_submodel_id = torch.zeros(self.opacities.shape[0], dtype=torch.long, device='cpu')
+        self.num_gs_rank = torch.zeros((WORLD_SIZE), device='cpu')
+        for model_id in model_id2box:
+            model_id:int = model_id
+            model_box:pgu.BoxinGrid3D = model_id2box[model_id]
+            range_low = model_box.range_low * scene_3d_grid.voxel_size + scene_3d_grid.range_low
+            range_up = model_box.range_up * scene_3d_grid.voxel_size + scene_3d_grid.range_low
+            flag1 = self.xyz >= range_low
+            flag2 = self.xyz <= range_up
+            flag1 = torch.tensor(flag1, device='cpu')
+            flag2 = torch.tensor(flag2, device='cpu')
+            _flag = torch.logical_and(flag1, flag2)
+            flag = torch.all(_flag, dim=-1, keepdim=False)
+            self.gs_submodel_id[flag] = model_id
+            self.num_gs_rank[model_id2rank[model_id]] += flag.sum()        
+            # print('num_gs_rank {}'.format(self.num_gs_rank))
+        self.num_gs_rank = self.num_gs_rank.cuda()
+        
+        
+    
+    def add_send_list(self, SEND_TO_RANK, model_id2rank):
+        # init
+        self.ops = []
+        
+        # select gs
+        select_gs = torch.zeros(self.opacities.shape[0], dtype=torch.bool)
+        for model_id in model_id2rank:
+            model_id:int = model_id
+            if model_id2rank[model_id] == SEND_TO_RANK:
+                select_gs[self.gs_submodel_id == model_id] = True
+        
+        # add send task
+        self.xyz = torch.from_numpy(self.xyz)
+        self.opacities = torch.from_numpy(self.opacities)
+        self.features_dc = torch.from_numpy(self.features_dc)
+        self.features_extra = torch.from_numpy(self.features_extra)
+        self.scales = torch.from_numpy(self.scales)
+        self.rots = torch.from_numpy(self.rots)
+        
+        send_xyz = self.xyz[select_gs].cuda()
+        send_opacities = self.opacities[select_gs].cuda()
+        send_features_dc = self.features_dc[select_gs].cuda()
+        send_features_extra = self.features_extra[select_gs].cuda()
+        send_scales = self.scales[select_gs].cuda()
+        send_rots = self.rots[select_gs].cuda()
+        send_gs_submodel_id = self.gs_submodel_id[select_gs].cuda()
+        
+        self.ops.append(dist.P2POp(dist.isend, send_xyz, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_opacities, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_features_dc, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_features_extra, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_scales, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_rots, SEND_TO_RANK))
+        self.ops.append(dist.P2POp(dist.isend, send_gs_submodel_id, SEND_TO_RANK))
+        
+        # print("add send task to RANK {} send_xyz shape {} type {}".format(SEND_TO_RANK, send_xyz.shape, send_xyz.type()))
+        # print("add send task to RANK {} send_opacities shape {} type {}".format(SEND_TO_RANK, send_opacities.shape, send_opacities.type()))
+        # print("add send task to RANK {} send_features_dc shape {} type {}".format(SEND_TO_RANK, send_features_dc.shape, send_features_dc.type()))
+        # print("add send task to RANK {} send_features_extra shape {} type {}".format(SEND_TO_RANK, send_features_extra.shape, send_features_extra.type()))
+        # print("add send task to RANK {} send_scales shape {} type {}".format(SEND_TO_RANK, send_scales.shape, send_scales.type()))
+        # print("add send task to RANK {} send_rots shape {} type {}".format(SEND_TO_RANK, send_rots.shape, send_rots.type()))
+        # print("add send task to RANK {} send_gs_submodel_id shape {} type {}".format(SEND_TO_RANK, send_gs_submodel_id.shape, send_gs_submodel_id.type()))
+        
+        # print("add send task to RANK {} recive size {}".format(SEND_TO_RANK, send_xyz.shape[0]))
+        
+    
+    def add_recv_list(self, CURRENT_RANK, RECV_FROM_RANK):
+        # init
+        self.ops = []
+        
+        # create space for recv
+        NUM_GS = self.num_gs_rank[CURRENT_RANK].long()
+        self.xyz = torch.zeros((NUM_GS, 3), dtype=torch.float32, device='cuda')
+        self.opacities = torch.zeros((NUM_GS, 1), dtype=torch.float32, device='cuda')
+        self.features_dc = torch.zeros((NUM_GS, 3, 1), dtype=torch.float32, device='cuda')
+        self.features_extra = torch.zeros((NUM_GS, 3, (self.sh_degree + 1) ** 2 - 1), dtype=torch.float32, device='cuda')
+        self.scales = torch.zeros((NUM_GS, 3), dtype=torch.float32, device='cuda')
+        self.rots = torch.zeros((NUM_GS, 4), dtype=torch.float32, device='cuda')
+        self.gs_submodel_id = torch.zeros((NUM_GS), dtype=torch.long, device='cuda')
+        
+        # add recv task        
+        self.ops.append(dist.P2POp(dist.irecv, self.xyz, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.opacities, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.features_dc, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.features_extra, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.scales, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.rots, RECV_FROM_RANK))
+        self.ops.append(dist.P2POp(dist.irecv, self.gs_submodel_id, RECV_FROM_RANK))
+        
+        # print("add recv task to RANK {} self.xyz shape {} type {}".format(CURRENT_RANK, self.xyz.shape, self.xyz.type()))
+        # print("add recv task to RANK {} self.opacities shape {} type {}".format(CURRENT_RANK, self.opacities.shape, self.opacities.type()))
+        # print("add recv task to RANK {} self.features_dc shape {} type {}".format(CURRENT_RANK, self.features_dc.shape, self.features_dc.type()))
+        # print("add recv task to RANK {} self.features_extra shape {} type {}".format(CURRENT_RANK, self.features_extra.shape, self.features_extra.type()))
+        # print("add recv task to RANK {} self.scales shape {} type {}".format(CURRENT_RANK, self.scales.shape, self.scales.type()))
+        # print("add recv task to RANK {} self.rots shape {} type {}".format(CURRENT_RANK, self.rots.shape, self.rots.type()))
+        # print("add recv task to RANK {} self.gs_submodel_id shape {} type {}".format(CURRENT_RANK, self.gs_submodel_id.shape, self.gs_submodel_id.type()))
+        
+        # print("add recv task to RANK {} recive size {}".format(CURRENT_RANK, self.xyz.shape[0]))
+        # print("RECV FROM {}".format(RECV_FROM_RANK))
+    
+    def send_recv(self):
+        if len(self.ops) > 0:
+            reqs = torch.distributed.batch_isend_irecv(self.ops)
+            for req in reqs:
+                req.wait()
+        torch.cuda.synchronize()
+
+    def set_gs_in_rank(self, RANK, model_id2rank):
+        # select gs
+            select_gs = torch.zeros(self.opacities.shape[0], dtype=torch.bool)
+            for model_id in model_id2rank:
+                model_id:int = model_id
+                if model_id2rank[model_id] == RANK:
+                    select_gs[self.gs_submodel_id == model_id] = True
+            
+            # add send task            
+            self.xyz = self.xyz[select_gs].cuda()
+            self.opacities = self.opacities[select_gs].cuda()
+            self.features_dc = self.features_dc[select_gs].cuda()
+            self.features_extra = self.features_extra[select_gs].cuda()
+            self.scales = self.scales[select_gs].cuda()
+            self.rots = self.rots[select_gs].cuda()
+            self.gs_submodel_id = self.gs_submodel_id[select_gs].cuda()
 
 class GaussianModel2(nn.Module):
     def setup_functions(self):
@@ -250,6 +525,22 @@ class GaussianModel2(nn.Module):
         self._opacity = optimizable_tensors["opacity"]
         # self._means2D_meta *= 0
 
+    def load_model(self, model:MemoryGaussianModel, model_id:int):
+
+        self._xyz = nn.Parameter(model.xyz[model.gs_submodel_id==model_id].contiguous().requires_grad_(True))
+        self._features_dc = nn.Parameter(model.features_dc[model.gs_submodel_id==model_id].transpose(1, 2).contiguous().contiguous().requires_grad_(True))
+        self._features_rest = nn.Parameter(model.features_extra[model.gs_submodel_id==model_id].transpose(1, 2).contiguous().contiguous().requires_grad_(True))
+        self._opacity = nn.Parameter(model.opacities[model.gs_submodel_id==model_id].contiguous().requires_grad_(True))
+        self._means2D_meta = nn.Parameter(torch.zeros(self._opacity.shape, dtype=torch.float, device=self.device).contiguous().requires_grad_(True))
+        self._scaling = nn.Parameter(model.scales[model.gs_submodel_id==model_id].contiguous().requires_grad_(True))
+        self._rotation = nn.Parameter(model.rots[model.gs_submodel_id==model_id].contiguous().requires_grad_(True))
+
+        self.active_sh_degree = self.max_sh_degree
+
+        self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
+        self.denom = torch.zeros((self.get_xyz.shape[0], 1), device=self.device)
+        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device)
+    
     def load_ply(self, path, ply_data_in_memory:PlyData=None):
         if ply_data_in_memory is None:
             plydata = PlyData.read(path)
@@ -832,147 +1123,3 @@ class BoundedGaussianModelGroup(nn.Module):
             ret.append(f"{k}:{self.all_gaussians[k].get_info()}")
         return '\n'.join(ret)
 
-class MemoryGaussianModel():
-    def __init__(self, sh_degree: int, max_size:int=None):
-        self.sh_degree = sh_degree
-        self.max_size = max_size
-        self.xyz = None
-        self.opacities = None
-        self.features_dc = None
-        self.features_extra = None
-        self.scales = None
-        self.rots = None
-        
-    def construct_list_of_attributes(self):
-        l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
-        # All channels except the 3 DC
-        for i in range(self.features_dc.shape[1]*self.features_dc.shape[2]):
-            l.append('f_dc_{}'.format(i))
-        for i in range(self.features_extra.shape[1]*self.features_extra.shape[2]):
-            l.append('f_rest_{}'.format(i))
-        l.append('opacity')
-        for i in range(self.scales.shape[1]):
-            l.append('scale_{}'.format(i))
-        for i in range(self.rots.shape[1]):
-            l.append('rot_{}'.format(i))
-        return l
-    
-    def save_whole_model(self, path, iteration):
-        # Initialization
-        self.xyz = np.empty((0, 3), dtype=np.float32)
-        self.opacities = np.empty((0, 1), dtype=np.float32)
-        self.features_dc = np.empty((0, 3, 1), dtype=np.float32)
-        self.features_extra = np.empty((0, 3, (self.sh_degree + 1) ** 2 - 1), dtype=np.float32)
-        self.scales = np.empty((0, 3), dtype=np.float32)
-        self.rots = np.empty((0, 4), dtype=np.float32)
-        
-        # Per rank read
-        for item in os.listdir(path):
-            rank_floder = os.path.join(path, item)
-            if os.path.isdir(rank_floder) and item.startswith("rank_"):
-                ply_floder_path = os.path.join(rank_floder, "point_cloud", "iteration_"+str(iteration))
-                for ply_item in os.listdir(ply_floder_path):
-                    if ply_item.startswith("point_cloud_"):
-                        ply_path = os.path.join(ply_floder_path, ply_item)
-                        plydata = PlyData.read(ply_path)
-
-                        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
-                                        np.asarray(plydata.elements[0]["y"]),
-                                        np.asarray(plydata.elements[0]["z"])),  axis=1)
-                        
-                        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
-
-                        features_dc = np.zeros((xyz.shape[0], 3, 1))
-                        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
-                        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
-                        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
-                        print("shape of features_dc", features_dc.shape)
-
-                        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
-                        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
-                        assert len(extra_f_names)==3*(self.sh_degree + 1) ** 2 - 3
-                        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
-                        for idx, attr_name in enumerate(extra_f_names):
-                            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
-                        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
-                        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
-                        print("shape of features_extra", features_extra.shape)
-                        
-
-                        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
-                        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
-                        scales = np.zeros((xyz.shape[0], len(scale_names)))
-                        for idx, attr_name in enumerate(scale_names):
-                            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
-
-                        print("add", item, ": number", xyz.shape[0])
-                        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
-                        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
-                        rots = np.zeros((xyz.shape[0], len(rot_names)))
-                        for idx, attr_name in enumerate(rot_names):
-                            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
-
-                        self.xyz = np.concatenate((self.xyz, xyz.astype(np.float32)), axis=0)
-                        self.opacities = np.concatenate((self.opacities, opacities.astype(np.float32)), axis=0)
-                        self.features_dc = np.concatenate((self.features_dc, features_dc.astype(np.float32)), axis=0)
-                        self.features_extra = np.concatenate((self.features_extra, features_extra.astype(np.float32)), axis=0)
-                        self.scales = np.concatenate((self.scales, scales.astype(np.float32)), axis=0)
-                        self.rots = np.concatenate((self.rots, rots.astype(np.float32)), axis=0)
-                        print("total: number", self.xyz.shape[0])
-                
-                
-        # save
-        save_path = os.path.join(path, "point_cloud", "iteration_"+str(iteration), "point_cloud.ply")
-        mkdir_p(os.path.dirname(save_path))
-        dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
-        normals = np.zeros_like(self.xyz)
-        # self.features_dc = np.transpose(self.features_dc, (0, 2, 1))
-        self.features_dc = self.features_dc.reshape(self.features_dc.shape[0], -1)
-        # self.features_extra = np.transpose(self.features_extra, (0, 2, 1))
-        self.features_extra = self.features_extra.reshape(self.features_extra.shape[0], -1)        
-        attributes = np.concatenate((self.xyz, normals, self.features_dc, self.features_extra, self.opacities, self.scales, self.rots), axis=1).conjugate()
-        elements = np.frombuffer(attributes.tobytes(), dtype=dtype_full)
-        el = PlyElement.describe(elements, 'vertex')
-        PlyData([el]).write(save_path)
-    
-    def load_ply(self, path):
-        plydata = PlyData.read(path)
-
-        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
-                        np.asarray(plydata.elements[0]["y"]),
-                        np.asarray(plydata.elements[0]["z"])),  axis=1)
-        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
-
-        features_dc = np.zeros((xyz.shape[0], 3, 1))
-        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
-        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
-        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
-
-        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
-        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
-        assert len(extra_f_names)==3*(self.sh_degree + 1) ** 2 - 3
-        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
-        for idx, attr_name in enumerate(extra_f_names):
-            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
-        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
-        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
-
-        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
-        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
-        scales = np.zeros((xyz.shape[0], len(scale_names)))
-        for idx, attr_name in enumerate(scale_names):
-            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
-
-        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
-        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
-        rots = np.zeros((xyz.shape[0], len(rot_names)))
-        for idx, attr_name in enumerate(rot_names):
-            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
-        
-        print("MemoryGaussianModel size:", xyz.shape[0])
-        self.xyz = xyz
-        self.opacities = opacities
-        self.features_dc = features_dc
-        self.features_extra = features_extra
-        self.scales = scales
-        self.rots = rots

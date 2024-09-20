@@ -149,7 +149,7 @@ class Trainer4TreePartition:
         # load or init scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes
         load_iteration = ply_iteration  
         if load_iteration > 0:
-            # load exisiting model
+            # load exisiting model to build BvhTree
             # use whole model
             if self.WHOLE_MODEL:
                 scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist_whole_model(
@@ -190,8 +190,9 @@ class Trainer4TreePartition:
             gaussians_group.training_setup(self.opt)   
         else:
             # load gs and optimizer
-            if self.WHOLE_MODEL:
-                print("load WHOLE_MODEL")
+            if self.WHOLE_MODEL and self.SHRAE_GS_INFO:
+                gs_utils.load_gs_from_whole_model(self.whole_model, model_id2box, model_id2rank, scene_3d_grid, self.sh_degree, self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)                
+            elif self.WHOLE_MODEL and not self.SHRAE_GS_INFO:
                 gs_utils.load_gs_from_single_ply(self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)                
             else:
                 gs_utils.load_gs_from_ply(self.opt, gaussians_group, local_model_ids, self.scene, load_iteration, self.logger)                

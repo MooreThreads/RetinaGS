@@ -9,7 +9,7 @@ import torch.distributed as dist
 from utils.general_utils import is_interval_in_batch, is_point_in_batch
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
-from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import MemoryGaussianModel, BoundedGaussianModel, BoundedGaussianModelGroup
 from scene.cameras import Camera, EmptyCamera
 from scene.scene4bounded_gaussian import SceneV3
 
@@ -123,7 +123,56 @@ def load_gs_from_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model
         
     gaussians_group.set_SHdegree(ply_iteration//1000)   
 
+# shengyi
+# load GS from .ply in CPU RAM of rank0, then distribute them via batch_isend_irecv
+def load_gs_from_whole_model(whole_model:MemoryGaussianModel, model_id2box, model_id2rank, scene_3d_grid, sh_degree:int, opt, gaussians_group:BoundedGaussianModelGroup, local_model_ids:list, scene:SceneV3, load_iteration:int, logger:logging.Logger):
+    # split GS by range in CPU RAM
+    RANK, WORLD_SIZE, N_MODEL = dist.get_rank(), dist.get_world_size(), len(model_id2box)
+    if RANK == 0:    
+        model_rank_i_send:MemoryGaussianModel = whole_model
+        model_rank_i_send.gs_in_range(model_id2box=model_id2box, model_id2rank=model_id2rank, scene_3d_grid=scene_3d_grid, WORLD_SIZE=WORLD_SIZE)
+        
+    # send the number of GS (WORLD_SIZE * 1) that RANK0 should send to other RANK 
+    num_gs_rank:torch.tensor = torch.zeros(WORLD_SIZE, device='cuda')
+    if RANK == 0:
+        num_gs_rank = model_rank_i_send.num_gs_rank
+    dist.broadcast(num_gs_rank, src=0, async_op=False, group=None)
+    dist.barrier()
+    # print("RANK {}: num_gs_rank {}".format(RANK, num_gs_rank))        
+        
+    # other rank get model_rank_i_recv
+    if RANK == 0:
+        for recv_i in range(1, WORLD_SIZE):
+            model_rank_i_send.add_send_list(SEND_TO_RANK=recv_i, model_id2rank=model_id2rank)      
+            model_rank_i_send.send_recv()      
+        model_rank_i_send.set_gs_in_rank(RANK=0, model_id2rank=model_id2rank)                            
+        model = model_rank_i_send
+    else:
+        model_rank_i_recv:MemoryGaussianModel = MemoryGaussianModel(sh_degree=sh_degree)  
+        model_rank_i_recv.num_gs_rank = num_gs_rank   
+        model_rank_i_recv.add_recv_list(CURRENT_RANK=RANK, RECV_FROM_RANK=0)
+        model_rank_i_recv.send_recv()
+        model = model_rank_i_recv       
+    dist.barrier()
+    
+    # init gs model
+    for mid in local_model_ids:        
+        # add to current rank             
+        _gau:BoundedGaussianModel = gaussians_group.get_model(mid)
+        _gau.load_model(model, mid)
+        # build spatial_lr_scale and optimizer        
+        _gau.spatial_lr_scale = scene.cameras_extent 
+        logger.info('set _gau.spatial_lr_scale as {}'.format(_gau.spatial_lr_scale))
+        _gau.training_setup(opt)
+        print('model {} has {} gs'.format(mid, _gau._xyz.shape[0]))
+        logger.info('model {} has {} gs'.format(mid, _gau._xyz.shape[0])) 
+        
+    gaussians_group.set_SHdegree(sh_degree)   
 
+
+# shengyi
+# a simple but not efficient way to load GS
+# every submodel will load the entire .ply and discard GS out of submodel range
 def load_gs_from_single_ply(opt, gaussians_group:BoundedGaussianModelGroup, local_model_ids:list, scene:SceneV3, load_iteration:int, logger:logging.Logger):
     ply_path =  os.path.join(os.path.dirname(scene.model_path), "point_cloud", "iteration_"+str(load_iteration), "point_cloud.ply")
     for mid in local_model_ids:
