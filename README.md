@@ -83,7 +83,7 @@ For single machine, an example of using default densification strategy and Colma
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --WHOLE_MODEL \
+        --bvh_depth 2 --WHOLE_MODEL --SHRAE_GS_INFO \
         --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
         --epochs 187
@@ -94,7 +94,7 @@ For single machine, an example of 从MVS Initialization出发，关闭点管理 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --WHOLE_MODEL \
+        --bvh_depth 2 --WHOLE_MODEL --SHRAE_GS_INFO \
         --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
         --epochs 187 \
@@ -127,6 +127,9 @@ MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
   #### --pointcloud_sample_rate
   指定初始化时下采样率，If provided N, uses 1/N point cloud. 当采用MVS初始化训练，显存不够时可以考虑增加降采样比例.
 
+  #### --SHRAE_GS_INFO
+  通过通信传输边界面GS，和光路拆分一起达到formulation上等效单GPU训练结果
+
 </details>
 <br>
 
@@ -155,7 +158,7 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件
 - [ ] 1.6k输出时多余提示
-- [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近）
+- [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近，可近乎无损合并+重新分割）
 - [x] data_Garden_MVS（降采样4倍Graden，作为示例）
 - [x] Output as one whole model（不加shared GS，边界面会出问题）
 - [x] Colmap MVS脚本 + 说明
