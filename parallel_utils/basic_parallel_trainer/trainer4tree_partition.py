@@ -16,6 +16,7 @@ os.environ["NCCL_SOCKET_TIMEOUT"] = "60000"
 
 from utils.loss_utils import l1_loss, ssim
 from utils.image_utils import psnr
+from lpipsPyTorch import lpips
 from utils.general_utils import safe_state, is_interval_in_batch, is_point_in_batch, build_rotation
 from utils.workload_utils import NaiveWorkloadBalancer
 
@@ -707,7 +708,7 @@ class Trainer4TreePartition:
             )
             name:str; dataloader:DataLoader; rlt:torch.Tensor
             for name, dataloader, rlt in zip(('train', 'test'), (eval_train_loader, eval_test_loader), (self.train_rlt, self.test_rlt)):
-                iteration, num_samples, psnr_total, l1_total = 0, 0.0, 0.0, 0.0
+                iteration, num_samples, psnr_total, ssim_total, lpips_total, l1_total = 0, 0.0, 0.0, 0.0, 0.0, 0.0
                 for idx, data in enumerate(dataloader):
                     # sync data
                     data_gpu, cameraUid_taskId_mainRank, task_id2cameraUid, uid2camera, task_id2camera = self.mini_batch_dist_sync(iteration, data)
@@ -722,12 +723,12 @@ class Trainer4TreePartition:
                     for task_rank in blender_result:
                         render, ori_camera = blender_result[task_rank], task_id2camera[task_rank[0]]
                         image, gt_image = render.render, ori_camera.original_image.to('cuda')
-                        Ll1, PSNR = l1_loss(image, gt_image).mean().item(), psnr(image, gt_image).mean().item()
-                        self.logger.info('{}, image {}, psnr {}, l1 {}'.format(name, ori_camera.image_name, PSNR, Ll1))
+                        Ll1, PSNR, SSIM, LPIPS = l1_loss(image, gt_image).mean().item(), psnr(image, gt_image).mean().item(), ssim(image, gt_image).item(), lpips(image, gt_image, net_type='vgg').item()
+                        self.logger.info('{}, image {}, psnr {}, ssim {}, lpips {}, l1 {}'.format(name, ori_camera.image_name, PSNR, SSIM, LPIPS, Ll1))
                         if self.tb_writer and (ori_camera.uid < 1000) and (ori_camera.uid % 5 == 0):
                             self.tb_writer.add_images(name + "_view_{}/render".format(ori_camera.image_name), image.clamp(min=0,max=1.0)[None], global_step=train_iteration)
                             self.tb_writer.add_images(name + "_view_{}/ground_truth".format(ori_camera.image_name), gt_image[None], global_step=train_iteration)
-                        num_samples += 1; psnr_total += PSNR; l1_total += Ll1
+                        num_samples += 1; psnr_total += PSNR; ssim_total += SSIM; lpips_total += LPIPS; l1_total += Ll1
                         if self.args.SAVE_EVAL_IMAGE:
                             torchvision.utils.save_image(image, os.path.join(self.scene.save_img_path, '{}_{}_{}'.format(name, ori_camera.image_name, train_iteration) + ".png"))
                             torchvision.utils.save_image(gt_image, os.path.join(self.scene.save_gt_path, '{}'.format(ori_camera.image_name) + ".png"))  
@@ -751,16 +752,20 @@ class Trainer4TreePartition:
                                 extra_render[k].render, 
                                 os.path.join(self.scene.save_img_path, '{}_{}_{}_sub_{}'.format(name, ori_camera.image_name, train_iteration, model_id) + ".png")
                             )
-                statistical = torch.tensor([num_samples, psnr_total, l1_total], dtype=torch.float32, device='cuda', requires_grad=False)
+                statistical = torch.tensor([num_samples, psnr_total, ssim_total, lpips_total, l1_total], dtype=torch.float32, device='cuda', requires_grad=False)
                 dist.all_reduce(statistical, op=dist.ReduceOp.SUM, group=None, async_op=False)
                 torch.cuda.synchronize()
-                _samples, psnr_test, l1_test = statistical.cpu().numpy()
+                _samples, psnr_test, ssim_test, lpips_test, l1_test = statistical.cpu().numpy()
 
-                self.logger.info("\n[ITER {}] Evaluating {}: samples {} L1 {} PSNR {}".format(train_iteration, name, _samples, l1_test/_samples, psnr_test/_samples))      
-                print("\n[ITER {}] Evaluating {}: samples{} L1 {} PSNR {}".format(train_iteration, name, _samples, l1_test/_samples, psnr_test/_samples))
+                if RANK==0:                
+                    self.logger.info("\n[ITER {}] Evaluating {}: samples {} L1 {} PSNR {} SSIM {} LPIPS {}".format(train_iteration, name, _samples, l1_test/_samples, psnr_test/_samples, ssim_test/_samples, lpips_test/_samples))      
+                    print("\n[ITER {}] Evaluating {}: samples {} L1 {} PSNR {} SSIM {} LPIPS {}".format(train_iteration, name, _samples, l1_test/_samples, psnr_test/_samples, ssim_test/_samples, lpips_test/_samples))
+                    
                 if self.tb_writer and RANK==0:
                     self.tb_writer.add_scalar(name + '/loss_viewpoint - l1_loss', l1_test/_samples, train_iteration)
                     self.tb_writer.add_scalar(name + '/loss_viewpoint - psnr', psnr_test/_samples, train_iteration)
+                    self.tb_writer.add_scalar(name + '/loss_viewpoint - ssim', ssim_test/_samples, train_iteration)
+                    self.tb_writer.add_scalar(name + '/loss_viewpoint - lpips', lpips_test/_samples, train_iteration)
                     
         if self.tb_writer:
             for name in self.gaussians_group.all_gaussians:

@@ -193,7 +193,14 @@ class MemoryGaussianModel():
             self.num_gs_rank[model_id2rank[model_id]] += flag.sum()        
             # print('num_gs_rank {}'.format(self.num_gs_rank))
         self.num_gs_rank = self.num_gs_rank.cuda()
-        
+    
+    def np2torch(self):
+        self.xyz = torch.from_numpy(self.xyz)
+        self.opacities = torch.from_numpy(self.opacities)
+        self.features_dc = torch.from_numpy(self.features_dc)
+        self.features_extra = torch.from_numpy(self.features_extra)
+        self.scales = torch.from_numpy(self.scales)
+        self.rots = torch.from_numpy(self.rots)
         
     
     def add_send_list(self, SEND_TO_RANK, model_id2rank):
@@ -207,14 +214,7 @@ class MemoryGaussianModel():
             if model_id2rank[model_id] == SEND_TO_RANK:
                 select_gs[self.gs_submodel_id == model_id] = True
         
-        # add send task
-        self.xyz = torch.from_numpy(self.xyz)
-        self.opacities = torch.from_numpy(self.opacities)
-        self.features_dc = torch.from_numpy(self.features_dc)
-        self.features_extra = torch.from_numpy(self.features_extra)
-        self.scales = torch.from_numpy(self.scales)
-        self.rots = torch.from_numpy(self.rots)
-        
+        # add send task        
         send_xyz = self.xyz[select_gs].cuda()
         send_opacities = self.opacities[select_gs].cuda()
         send_features_dc = self.features_dc[select_gs].cuda()

@@ -97,11 +97,14 @@ class SceneV3:
                         padding_width=self.gaussians_group.padding_width
                     )
 
-        self.save_img_path = os.path.join(self.model_path, 'img')
-        self.save_depth_path = os.path.join(self.model_path, 'depth')
-        self.save_gt_path = os.path.join(self.model_path, 'gt')
+        # self.save_img_path = os.path.join(self.model_path, 'img')
+        self.save_img_path = os.path.join(os.path.dirname(self.model_path), 'img')
+        # self.save_depth_path = os.path.join(self.model_path, 'depth')
+        # self.save_depth_path = os.path.join(os.path.dirname(self.model_path), 'depth')
+        # self.save_gt_path = os.path.join(self.model_path, 'gt')
+        self.save_gt_path = os.path.join(os.path.dirname(self.model_path), 'gt')
         os.makedirs(self.save_img_path, exist_ok=True)
-        os.makedirs(self.save_depth_path, exist_ok=True)
+        # os.makedirs(self.save_depth_path, exist_ok=True)
         os.makedirs(self.save_gt_path, exist_ok=True)
 
     def getTrainCameras(self, scale=1.0):

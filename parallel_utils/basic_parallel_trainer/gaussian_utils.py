@@ -142,6 +142,7 @@ def load_gs_from_whole_model(whole_model:MemoryGaussianModel, model_id2box, mode
         
     # other rank get model_rank_i_recv
     if RANK == 0:
+        model_rank_i_send.np2torch()                                    
         for recv_i in range(1, WORLD_SIZE):
             model_rank_i_send.add_send_list(SEND_TO_RANK=recv_i, model_id2rank=model_id2rank)      
             model_rank_i_send.send_recv()      
