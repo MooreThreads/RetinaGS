@@ -58,7 +58,7 @@ class Trainer4TreePartition:
 
         self.SCENE_GRID_SIZE:np.ndarray = args.SCENE_GRID_SIZE
         self.SPLIT_ORDERS: List[int] = args.SPLIT_ORDERS
-        self.WHOLE_MODEL:bool = args.WHOLE_MODEL
+        self.WHOLE_MODEL:bool = not args.SPLIT_MODEL
         self.ENABLE_REPARTITION:bool = args.ENABLE_REPARTITION
         self.REPARTITION_START_EPOCH:int = args.REPARTITION_START_EPOCH
         self.REPARTITION_END_EPOCH:int = args.REPARTITION_END_EPOCH

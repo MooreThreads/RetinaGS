@@ -39,13 +39,14 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden \
-        --bvh_depth 2 --WHOLE_MODEL \
+        --bvh_depth 2 \
         --max_batch_size 4  --max_load 8  \
         -r 1 --eval \
         --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑Evaluation（替换-s和-m即可）. 
+Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑多卡MP的Evaluation（替换-s和-m即可）. 
+
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
 Arguments of 3DGS我们大部分保留. 
@@ -66,12 +67,10 @@ Arguments of 3DGS我们大部分保留.
   Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --bvh_depth
   Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
-  #### --WHOLE_MODEL
-  仅读入单个ply
   #### --max_batch_size --max_load 
   Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 当显存不够时，请尝试降低这两个值.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
-  仅进行Evaluation，且保存图像和每个submodel输出的子图像。
+  仅进行Evaluation，且保存渲染图像和参与本次渲染的每个submodel输出的子图像。
 
 </details>
 <br>
@@ -79,11 +78,11 @@ Arguments of 3DGS我们大部分保留.
 
 
 ### Single Machine Training 
-For single machine, an example of using default densification strategy and Colmap Initialization  command is:
+For single machine, an example of using default densification strategy and Colmap Initialization command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --WHOLE_MODEL --SHRAE_GS_INFO \
+        --bvh_depth 2 --SHRAE_GS_INFO \
         --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
         --epochs 187
@@ -94,7 +93,7 @@ For single machine, an example of 从MVS Initialization出发，关闭点管理 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --WHOLE_MODEL --SHRAE_GS_INFO \
+        --bvh_depth 2 --SHRAE_GS_INFO \
         --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
         --epochs 187 \
@@ -107,10 +106,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 
 Arguments of 3DGS我们大部分保留. 
 
-MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
-
-  #### --WHOLE_MODEL
-  输出单独ply文件，当GS数量过多时，可以考虑不加该flag以提升读取和写入速度.
+MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh. 
 
   #### --epochs
   指定训练epoch数量.
@@ -127,8 +123,12 @@ MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
   #### --pointcloud_sample_rate
   指定初始化时下采样率，If provided N, uses 1/N point cloud. 当采用MVS初始化训练，显存不够时可以考虑增加降采样比例.
 
+  #### --SPLIT_MODEL
+  输出每个submodel独立的ply文件+分界面信息，当GS数量过多时，可以考虑加该flag以提升读取和写入开销
+
   #### --SHRAE_GS_INFO
-  通过通信传输边界面GS，和光路拆分一起达到formulation上等效单GPU训练结果
+  通过通信传输边界面GS，和光路拆分一起达到formulation上等效单GPU训练结果.
+  当--SPLIT_MODEL flag打开时，可以考虑不加--SHRAE_GS_INFO flag，可以略微加速训练速度并降低显存开销.
 
 </details>
 <br>
@@ -148,7 +148,6 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] 使用--SPLIT_MODEL代替--WHOLE_MODEL
 - [ ] 统一evaluation输出到外层
 - [ ] 加上指定iteration的训练
 - [ ] 支持Evaluation输出LPIPS和SSIM
@@ -159,6 +158,7 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 - [ ] 说明MatrixCity-Aerial的下载和推理
 - [ ] 清理多余文件
 - [ ] 1.6k输出时多余提示
+- [x] 使用--SPLIT_MODEL代替--WHOLE_MODEL
 - [x] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集，可达到无损，强制Guide用户使用）
 - [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近，可近乎无损合并+重新分割）
 - [x] data_Garden_MVS（降采样4倍Graden，作为示例）
