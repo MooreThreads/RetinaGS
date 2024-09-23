@@ -680,17 +680,16 @@ class Trainer4TreePartition:
                 if (i_epoch % self.EVAL_INTERVAL_EPOCH == 0  and i_epoch != 0) or (i_epoch == (NUM_EPOCH-1)):  
                     torch.cuda.empty_cache()  
                     self.logger.info('eval after epoch {}'.format(i_epoch))
-                    self.eval(train_iteration=iteration)
+                    self.load_iteration=iteration
+                    self.eval()
                     torch.cuda.empty_cache()     
 
         print('complete')
         self.logger.info('complete')
 
-    def eval(self, train_iteration:int):
+    def eval(self):
         with torch.no_grad():
-            train_iteration = scene_utils.find_ply_iteration(self.scene, self.logger) if train_iteration<=0 else train_iteration
-            if self.WHOLE_MODEL:
-                self.load_iteration = scene_utils.find_ply_iteration_single_modle(self.scene, self.logger) if self.ply_iteration<=0 else self.ply_iteration
+            train_iteration = self.load_iteration
               
             RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
             # gather SharedGSInfo only once

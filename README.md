@@ -149,13 +149,13 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 
 ## To Do
 - [ ] 加上指定iteration的训练
-- [ ] Model Zoo的准备和描述
+- [ ] 清理多余文件
 - [ ] 翻译并polish
+- [ ] Model Zoo的准备和描述
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 - [ ] 说明MatrixCity-Aerial的下载和推理
-- [ ] 清理多余文件
-- [ ] 1.6k输出时多余提示
+- [x] 1.6k输出时多余提示
 - [x] 支持Evaluation输出LPIPS和SSIM
 - [x] 统一evaluation输出到外层
 - [x] 使用--SPLIT_MODEL代替--WHOLE_MODEL
