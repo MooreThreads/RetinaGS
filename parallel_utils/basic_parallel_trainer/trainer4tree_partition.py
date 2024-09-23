@@ -201,7 +201,7 @@ class Trainer4TreePartition:
         self.logger.info('models are initialized:' + gaussians_group.get_info())
 
         # set up training args
-        self.opt.iterations = len(self.train_dataset) *self.opt.epochs
+        # self.opt.iterations = len(self.train_dataset) *self.opt.epochs
         self.opt.scaling_lr_max_steps = len(self.train_dataset) *self.opt.epochs
         self.logger.info('set scaling_lr_max_steps {}'.format(self.opt.scaling_lr_max_steps))
         # self.gaussians_group.training_setup(self.opt) 
@@ -581,7 +581,9 @@ class Trainer4TreePartition:
         RANK, WORLD_SIZE = dist.get_rank(), dist.get_world_size()
         start_epoch = int(round(self.start_iteration/len(self.train_dataset)))
         self.logger.info('start from epoch {}'.format(start_epoch))
-        NUM_EPOCH = self.opt.epochs - start_epoch
+        epochs = self.opt.epochs if self.opt.epochs > 0 else int(round(self.opt.iterations/len(self.train_dataset)))
+        # print("epochs {} iteration {}".format(epochs, self.opt.iterations))
+        NUM_EPOCH = epochs - start_epoch
        
         iter_start, iter_end = torch.cuda.Event(enable_timing = True), torch.cuda.Event(enable_timing = True)
         progress_bar = tqdm(range(self.start_iteration, NUM_EPOCH*len(self.train_dataset)), desc="Training progress") if RANK == 0 else None 

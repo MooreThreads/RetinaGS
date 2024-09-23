@@ -107,7 +107,7 @@ class OptimizationParams(ParamGroup):
         self.random_background = False
         
         # New
-        self.epochs = 2000
+        self.epochs = -1
         self.densify_until_epoch = 200
         self.save_epoch_interval = -1
         self.eval_epoch_interval = 10
