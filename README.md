@@ -39,13 +39,11 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden \
-        --bvh_depth 2 \
-        --max_batch_size 4  --max_load 8  \
-        -r 1 --eval \
-        --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
+        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
+        --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly multi-GPU evaluation by simply replacing the -s and -m parameters.
+Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly run multi-GPU evaluation by simply replacing the -s and -m parameters.
 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
@@ -62,14 +60,12 @@ We retain most of the arguments for 3DGS.
   Path to the source directory containing a COLMAP or Synthetic NeRF data set.
   #### --model_path / -m 
   Path where the trained model is stored. 
-  #### --resolution / -r
-  Specifies resolution of the loaded images before training. If provided 1, 2, 4 or 8, uses original, 1/2, 1/4 or 1/8 resolution, respectively. For all other values, rescales the width to the given number while maintaining image aspect. If not set and input image width exceeds 1.6K pixels, inputs are automatically rescaled to this target.
-  #### --eval
-  Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --bvh_depth
   Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
   #### --max_batch_size --max_load 
   Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. If there is insufficient GPU memory, consider reducing these values.
+  #### --eval
+  Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
   Perform evaluation only, and save both the rendered images and the sub-images output by each submodel involved in the rendering.
 
@@ -78,26 +74,40 @@ We retain most of the arguments for 3DGS.
 
 
 
-### Single Machine Training 
+### Single Machine Training by Default Densification Strategy
+
 For single machine, an example of using default densification strategy and Colmap Initialization command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --SHRAE_GS_INFO \
-        --max_batch_size 4  --max_load 8 \
-        -r 1 --eval \
-        --epochs 187
+        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
+        -r 1 --eval
 ```
 
+<details>
+<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
+
+We retain most of the arguments for 3DGS.
+
+  #### --resolution / -r
+  Specifies resolution of the loaded images before training. If provided 1, 2, 4 or 8, uses original, 1/2, 1/4 or 1/8 resolution, respectively. For all other values, rescales the width to the given number while maintaining image aspect. If not set and input image width exceeds 1.6K pixels, inputs are automatically rescaled to this target.
+  #### --interations
+  Number of total iterations to train for, 30_000 by default.
+  #### --epochs
+  Number of training epochs. Effective only when --iterations is not specified.
+
+</details>
+<br>
+
+
+### Single Machine Training by MVS Initialization
 
 For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --SHRAE_GS_INFO \
-        --max_batch_size 4  --max_load 8 \
+        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
-        --epochs 187 \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
         --points3D MVS_points3D --pointcloud_sample_rate 1        
 ```
@@ -108,9 +118,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 We retain most of the arguments for 3DGS.
 
 MVS points are obtained using dense reconstruction with Colmap, see scripts/colmap_MVS.sh.
-
-  #### --epochs
-  Specify the number of training epochs.
   
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, ```0.00016``` and ```0.0000016``` by default.
@@ -127,9 +134,9 @@ MVS points are obtained using dense reconstruction with Colmap, see scripts/colm
   #### --SPLIT_MODEL
   Output individual ply files for each submodel plus interface information; consider adding this flag to improve read and write overhead when there are too many GS.
 
-  #### --SHRAE_GS_INFO
-  Transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with light path splitting.
-  When the --SPLIT_MODEL flag is enabled, consider not adding the --SHARE_GS_INFO flag to slightly speed up training and reduce GPU memory usage.
+  #### --NOT_SHRAE_GS_INFO
+  By dafult, we transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with light path splitting.
+  When the --SPLIT_MODEL flag is enabled, consider adding the --NOT_SHARE_GS_INFO flag to slightly speed up training and reduce GPU memory usage.
 
 </details>
 <br>
@@ -153,6 +160,8 @@ M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for
 - [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
+- [ ] 放到新仓，修改网址
+- [x] 默认打开--SHRAE_GS_INFO
 - [x] 翻译并polish
 - [x] 加上指定iteration的训练
 - [x] 1.6k输出时多余提示

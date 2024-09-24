@@ -100,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("--SKIP_SPLIT", action='store_true', default=False)
     parser.add_argument("--SKIP_CLONE", action='store_true', default=False)
 
-    parser.add_argument("--SHRAE_GS_INFO", action='store_true', default=False, help='transport the primitives on model boundary')
+    parser.add_argument("--NOT_SHRAE_GS_INFO", action='store_true', default=False, help='do not transport the primitives on model boundary')
     parser.add_argument("--MAX_SIZE_SINGLE_GS", type=int, default=10_000_000)
     parser.add_argument("--MAX_LOAD", type=int, default=16)
     parser.add_argument("--MAX_BATCH_SIZE", type=int, default=4)

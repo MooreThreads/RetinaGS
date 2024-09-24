@@ -64,7 +64,7 @@ class Trainer4TreePartition:
         self.REPARTITION_START_EPOCH:int = args.REPARTITION_START_EPOCH
         self.REPARTITION_END_EPOCH:int = args.REPARTITION_END_EPOCH
         self.REPARTITION_INTERVAL_EPOCH:int = args.REPARTITION_INTERVAL_EPOCH 
-        self.SHRAE_GS_INFO:bool = args.SHRAE_GS_INFO
+        self.SHRAE_GS_INFO:bool = not args.NOT_SHRAE_GS_INFO
 
         self.Z_NEAR:float = args.Z_NEAR
         self.Z_FAR:float = args.Z_FAR
