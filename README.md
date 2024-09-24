@@ -94,7 +94,7 @@ We retain most of the arguments for 3DGS.
   #### --interations
   Number of total iterations to train for, 30_000 by default.
   #### --epochs
-  Number of training epochs. Effective only when --iterations is not specified.
+  Number of total epochs to train for. Effective only when --iterations is not specified.
 
 </details>
 <br>
