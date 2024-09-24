@@ -105,7 +105,7 @@ We retain most of the arguments for 3DGS.
 For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
-    main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
+    main_mp_tree.py -s data/data_Garden -m model/model_Garden_MVS \
         --bvh_depth 2 --max_batch_size 4  --max_load 8 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
