@@ -84,7 +84,6 @@ class MemoryGaussianModel():
                         features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
                         features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
                         features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
-                        print("shape of features_dc", features_dc.shape)
 
                         extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
                         extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
@@ -94,7 +93,6 @@ class MemoryGaussianModel():
                             features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
                         # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
                         features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.sh_degree + 1) ** 2 - 1))
-                        print("shape of features_extra", features_extra.shape)
                         
 
                         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]

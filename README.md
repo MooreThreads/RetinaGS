@@ -39,7 +39,7 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden \
-        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
@@ -80,7 +80,7 @@ For single machine, an example of using default densification strategy and Colma
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         -r 1 --eval
 ```
 
@@ -106,7 +106,7 @@ For a single machine, an example command starting from MVS Initialization and tu
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
         --points3D MVS_points3D --pointcloud_sample_rate 1        
@@ -150,7 +150,7 @@ For multiple machines, start command on each node with corresponding parameters,
 | Data and Model                                                | PSNR | #GS   |resolution|
 |:-----------------:                                            |:----:|:-----:|:-----:   |
 | [[Room-1.6k]](https://ai-reality.github.io/RetinaGS/)         |32.86 |22.41M |1600×1036 |
-| [[Bicycle]](https://ai-reality.github.io/RetinaGS/)           |24.86 |31.67M |4944×3284 |
+| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |4944×3284 |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
 
 M means Million. Add -r 1600 flag while evaluate Room-1.6k.
@@ -192,7 +192,7 @@ Copyright @2023-2024 Moore Threads Technology Co., Ltd("Moore Threads"). All rig
 ## Contact
 ```
 Bingling Li    :   lblhust903@gmail.com
-Shengyi Chen   :   pythonchanner@gmail.com
+Shengyi Chen   :   chenshengyi@std.uestc.edu.cn
 ```
 
 
