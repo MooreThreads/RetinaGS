@@ -55,7 +55,7 @@ class Trainer4TreePartition:
         self.pipe = pipe
         self.args = args
         self.nccl_group = nccl_group
-        self.TENSORBOARD_FOUND:bool = not args.DISABLE_TENSORBOARD
+        self.TENSORBOARD_FOUND:bool = args.ENABLE_TENSORBOARD
 
         self.SCENE_GRID_SIZE:np.ndarray = args.SCENE_GRID_SIZE
         self.SPLIT_ORDERS: List[int] = args.SPLIT_ORDERS

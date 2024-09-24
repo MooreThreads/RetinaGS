@@ -85,7 +85,7 @@ if __name__ == "__main__":
     parser.add_argument("--CKPT_MAX_NUM", type=int, default=5)
     # grid parameters
     parser.add_argument("--SPLIT_MODEL", action='store_true', default=False)
-    parser.add_argument("--DISABLE_TENSORBOARD", action='store_true', default=False)
+    parser.add_argument("--ENABLE_TENSORBOARD", action='store_true', default=False)
     parser.add_argument("--ENABLE_REPARTITION", action='store_true', default=False)
     parser.add_argument("--REPARTITION_START_EPOCH", type=int, default=10)
     parser.add_argument("--REPARTITION_END_EPOCH", type=int, default=300)
