@@ -32,7 +32,7 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 ### Download Data and Pretrained Model
 
-Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). 把data_Garden放到data/下，model_Garden放到model/下.
+Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). Place data_Garden in the data/ and model_Garden in the model/.
 
 ### Evaluation
 
@@ -49,14 +49,15 @@ Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-spla
 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
-Arguments of 3DGS我们大部分保留. 
+
+We retain most of the arguments for 3DGS.
 
   #### CUDA_VISIBLE_DEVICES=0,1
-  指定编号为CUDA_0和CUDA_1的GPU参与Evaluation.
+  Designate GPUs numbered CUDA_0 and CUDA_1 for Evaluation.
   #### --nnodes=1 --nproc_per_node=2
-  机器数量为1，GPU数量为2.
+  The number of machine is 1，the number of GPU is 2.
   #### --master_addr=127.0.0.1 --master_port=7356
-  the host and port of torchrun. 注意同一台机器上不同训练任务间的--master_port需要不同.
+  the host and port of torchrun. Ensure that the --master_port is different for different training tasks on the same machine.
   #### --source_path / -s
   Path to the source directory containing a COLMAP or Synthetic NeRF data set.
   #### --model_path / -m 
@@ -68,9 +69,9 @@ Arguments of 3DGS我们大部分保留.
   #### --bvh_depth
   Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
   #### --max_batch_size --max_load 
-  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. 当显存不够时，请尝试降低这两个值.
+  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. If there is insufficient GPU memory, consider reducing these values.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
-  仅进行Evaluation，且保存渲染图像和参与本次渲染的每个submodel输出的子图像。
+  Perform evaluation only, and save both the rendered images and the sub-images output by each submodel involved in the rendering.
 
 </details>
 <br>
@@ -89,7 +90,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ```
 
 
-For single machine, an example of 从MVS Initialization出发，关闭点管理 (RetinaGS paper中的训练方式) command is:
+For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_MP_tree.py -s data/data_Garden -m model/model_Garden_MVS \
@@ -104,12 +105,12 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
 
-Arguments of 3DGS我们大部分保留. 
+We retain most of the arguments for 3DGS.
 
-MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh. 
+MVS points are obtained using dense reconstruction with Colmap, see scripts/colmap_MVS.sh.
 
   #### --epochs
-  指定训练epoch数量.
+  Specify the number of training epochs.
   
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, ```0.00016``` and ```0.0000016``` by default.
@@ -118,17 +119,17 @@ MVS点使用colmap稠密重建得到，见scripts/colmap_MVS.sh.
   Iteration where densification stops, ```15000``` by default and ```0``` for abandon.
 
   #### --points3D
-  指定初始化使用的点云文件.
+  Specify the point cloud file used for initialization.
 
   #### --pointcloud_sample_rate
-  指定初始化时下采样率，If provided N, uses 1/N point cloud. 当采用MVS初始化训练，显存不够时可以考虑增加降采样比例.
+  Specify the downsampling rate at initialization; if N is provided, use 1/N of the point cloud. Consider increasing the downsampling ratio when using MVS initialization if there is not enough GPU memory.
 
   #### --SPLIT_MODEL
-  输出每个submodel独立的ply文件+分界面信息，当GS数量过多时，可以考虑加该flag以提升读取和写入开销
+  Output individual ply files for each submodel plus interface information; consider adding this flag to improve read and write overhead when there are too many GS.
 
   #### --SHRAE_GS_INFO
-  通过通信传输边界面GS，和光路拆分一起达到formulation上等效单GPU训练结果.
-  当--SPLIT_MODEL flag打开时，可以考虑不加--SHRAE_GS_INFO flag，可以略微加速训练速度并降低显存开销.
+  Transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with light path splitting.
+  When the --SPLIT_MODEL flag is enabled, consider not adding the --SHARE_GS_INFO flag to slightly speed up training and reduce GPU memory usage.
 
 </details>
 <br>
@@ -148,13 +149,12 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] 加上指定iteration的训练
 - [ ] 清理多余文件
-- [ ] 翻译并polish
-- [ ] Model Zoo的准备和描述
+- [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
-- [ ] 说明MatrixCity-Aerial的下载和推理
+- [x] 翻译并polish
+- [x] 加上指定iteration的训练
 - [x] 1.6k输出时多余提示
 - [x] 支持Evaluation输出LPIPS和SSIM
 - [x] 统一evaluation输出到外层
