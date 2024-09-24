@@ -45,7 +45,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
         --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). 使用3DGS仓库训练的模型可以直接跑多卡MP的Evaluation（替换-s和-m即可）. 
+Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly multi-GPU evaluation by simply replacing the -s and -m parameters.
 
 <details>
 <summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
