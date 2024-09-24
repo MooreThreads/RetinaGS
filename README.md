@@ -153,7 +153,7 @@ For multiple machines, start command on each node with corresponding parameters,
 | [[Bicycle]](https://ai-reality.github.io/RetinaGS/)           |24.86 |31.67M |4944×3284 |
 | [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
 
-M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
+M means Million. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
 - [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
