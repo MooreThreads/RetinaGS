@@ -39,7 +39,7 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden \
-        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
@@ -62,8 +62,8 @@ We retain most of the arguments for 3DGS.
   Path where the trained model is stored. 
   #### --bvh_depth
   Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
-  #### --max_batch_size --max_load 
-  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--max_batch_size 4  --max_load 8" just set every batch as size of 4 in this case. If there is insufficient GPU memory, consider reducing these values.
+  #### --MAX_BATCH_SIZE --MAX_LOAD 
+  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--MAX_BATCH_SIZE 4  --MAX_LOAD 8" just set every batch as size of 4 in this case. If there is insufficient GPU memory, consider reducing these values.
   #### --eval
   Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
@@ -80,7 +80,7 @@ For single machine, an example of using default densification strategy and Colma
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
         -r 1 --eval
 ```
 
@@ -106,7 +106,7 @@ For a single machine, an example command starting from MVS Initialization and tu
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --max_batch_size 4  --max_load 8 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 4  --MAX_LOAD 8 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
         --points3D MVS_points3D --pointcloud_sample_rate 1        
