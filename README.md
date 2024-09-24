@@ -37,7 +37,7 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 ### Evaluation
 
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
@@ -104,7 +104,7 @@ We retain most of the arguments for 3DGS.
 
 For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=8356 \
     main_mp_tree.py -s data/data_Garden -m model/model_Garden_MVS \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         -r 1 --eval \
@@ -120,7 +120,7 @@ We retain most of the arguments for 3DGS.
 MVS points are obtained using dense reconstruction with Colmap, see scripts/colmap_MVS.sh.
   
   #### --position_lr_init --position_lr_final
-  Initial and Final 3D position learning rate, ```0.00016``` and ```0.0000016``` by default.
+  Initial and Final 3D position learning rate, 1.6 × 10<sup>-4</sup> to 1.6 × 10<sup>-6</sup> by default. Since the primitives are initialized with relatively accurate position parameters from MVS, we reduce the learning rate for the position parameters in all primitives from 1.6 × 10<sup>-6</sup> to 1.6 × 10<sup>-8</sup> with a exponential decay function
 
   #### --densify_until_iter
   Iteration where densification stops, ```15000``` by default and ```0``` for abandon.
@@ -135,7 +135,7 @@ MVS points are obtained using dense reconstruction with Colmap, see scripts/colm
   Output individual ply files for each submodel plus interface information; consider adding this flag to improve read and write overhead when there are too many GS.
 
   #### --NOT_SHRAE_GS_INFO
-  By dafult, we transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with light path splitting.
+  By dafult, we transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with alpha-blending splitting.
   When the --SPLIT_MODEL flag is enabled, consider adding the --NOT_SHARE_GS_INFO flag to slightly speed up training and reduce GPU memory usage.
 
 </details>
