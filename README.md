@@ -156,11 +156,11 @@ For multiple machines, start command on each node with corresponding parameters,
 M means Million. See Appendix in [[Paper]](https://arxiv.org/pdf/2406.11836) for complete results. Add -r 1600 flag while evaluate Room-1.6k.
 
 ## To Do
-- [ ] 清理多余文件
 - [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
 - [ ] 放到新仓，修改网址
+- [x] 清理多余文件
 - [x] 默认打开--SHRAE_GS_INFO
 - [x] 翻译并polish
 - [x] 加上指定iteration的训练
