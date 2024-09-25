@@ -38,7 +38,7 @@ Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS
 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
-    main_mp_tree.py -s data/data_Garden -m model/model_Garden \
+    main.py -s data/data_Garden -m model/model_Garden \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
@@ -46,7 +46,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly run multi-GPU evaluation by simply replacing the -s and -m parameters.
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Evaluation</span></summary>
+<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Evaluation</span></summary>
 
 We retain most of the arguments for 3DGS.
 
@@ -79,13 +79,13 @@ We retain most of the arguments for 3DGS.
 For single machine, an example of using default densification strategy and Colmap Initialization command is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
-    main_mp_tree.py -s data/data_Garden -m model/model_Garden_default_densification \
+    main.py -s data/data_Garden -m model/model_Garden_default_densification \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         -r 1 --eval
 ```
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
+<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Training</span></summary>
 
 We retain most of the arguments for 3DGS.
 
@@ -105,7 +105,7 @@ We retain most of the arguments for 3DGS.
 For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=8356 \
-    main_mp_tree.py -s data/data_Garden -m model/model_Garden_MVS \
+    main.py -s data/data_Garden -m model/model_Garden_MVS \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
@@ -113,7 +113,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ```
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main_MP_tree.py under Training</span></summary>
+<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Training</span></summary>
 
 We retain most of the arguments for 3DGS.
 
