@@ -76,8 +76,6 @@ Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-spla
 <details>
 <summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
-We have retained most of the arguments for 3DGS.
-
   #### CUDA_VISIBLE_DEVICES=0,1
   Designate GPUs numbered CUDA_0 and CUDA_1 for Evaluation.
   #### --nnodes=1 --nproc_per_node=2
@@ -114,7 +112,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 <details>
 <summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
-We retain most of the arguments for 3DGS.
 
   #### --resolution / -r
   Specifies resolution of the loaded images before training. If provided 1, 2, 4 or 8, uses original, 1/2, 1/4 or 1/8 resolution, respectively. For all other values, rescales the width to the given number while maintaining image aspect. If not set and input image width exceeds 1.6K pixels, inputs are automatically rescaled to this target.
@@ -143,8 +140,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 <details>
 <summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
-We retain most of the arguments for 3DGS.
-
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, 1.6 × 10<sup>-4</sup> to 1.6 × 10<sup>-6</sup> by default. Since the primitives are initialized with relatively accurate position parameters from MVS, we reduce the learning rate for the position parameters in all primitives from 1.6 × 10<sup>-6</sup> to 1.6 × 10<sup>-8</sup> with a exponential decay function
 
@@ -170,13 +165,7 @@ We retain most of the arguments for 3DGS.
 ### Multi-node Training
 
 We provide shell scripts to start or stop multi-node training, which can be found in the `multi_node_cmds/` directory.
-
-
-<!-- ## Usage
-
-### Download Data and Pretrained Model
-
-Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). Place data_Garden in the data/ and model_Garden in the model/. -->
+<br>
 
 
 
