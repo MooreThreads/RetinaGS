@@ -28,11 +28,39 @@ conda activate retina_gs
 
 Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
-## Usage
+## Quick Start
 
-### Download Data and Pretrained Model
+1. Download the testing scence and the corresponded pretrained model from [GoogleDrive]() and uncompress them under the root path.
 
-Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). Place data_Garden in the data/ and model_Garden in the model/.
+2. Evaluate the model using the command below:
+```
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
+    main.py -s data/data_Garden -m model/model_Garden \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
+        --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
+```
+3. The intermediate render results of each submodule, as well as the final output, can be found in `xxxxxx`.
+
+### Model Zoo
+
+The pre-trained models on several public datasets are available for download on [GoogleDrive]().
+
+| Data and Model                                                | PSNR | #GS   |Resolution|
+|:-----------------:                                            |:----:|:-----:|:-----:   |
+| [[Room-1.6k]](https://ai-reality.github.io/RetinaGS/)         |32.86 |22.41M |1600×1036 |
+| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |4944×3284 |
+| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
+
+<!-- M means Million. Add -r 1600 flag while evaluate Room-1.6k. -->
+
+
+## Usage 
+
+### Data
+The data structure should be organised as follows:
+```
+```
+
 
 ### Evaluation
 
@@ -46,9 +74,9 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 Our implement is based on 3DGS (https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly run multi-GPU evaluation by simply replacing the -s and -m parameters.
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Evaluation</span></summary>
+<summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
-We retain most of the arguments for 3DGS.
+We have retained most of the arguments for 3DGS.
 
   #### CUDA_VISIBLE_DEVICES=0,1
   Designate GPUs numbered CUDA_0 and CUDA_1 for Evaluation.
@@ -73,10 +101,9 @@ We retain most of the arguments for 3DGS.
 <br>
 
 
+### Training
 
-### Single Machine Training by Default Densification Strategy
-
-For single machine, an example of using default densification strategy and Colmap Initialization command is:
+Start training via: 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
     main.py -s data/data_Garden -m model/model_Garden_default_densification \
@@ -85,7 +112,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ```
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Training</span></summary>
+<summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
 We retain most of the arguments for 3DGS.
 
@@ -100,9 +127,10 @@ We retain most of the arguments for 3DGS.
 <br>
 
 
-### Single Machine Training by MVS Initialization
+### Training with MVS Initialization
 
-For a single machine, an example command starting from MVS Initialization and turning off point management (as trained in the RetinaGS paper) is:
+In our paper, we use MVS initialization to control the number of Gaussian splats. You can obtain MVS results via Colmap using this script: `scripts/colmap_MVS.sh`. We recommend stopping the growth and pruning of splats during the training process. Additionally, adjusting a few hyperparameters can help stabilize the training. The following is a sample command:
+
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=8356 \
     main.py -s data/data_Garden -m model/model_Garden_MVS \
@@ -113,12 +141,10 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ```
 
 <details>
-<summary><span style="font-weight: bold;">Command Line Arguments for main.py under Training</span></summary>
+<summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
 We retain most of the arguments for 3DGS.
 
-MVS points are obtained using dense reconstruction with Colmap, see scripts/colmap_MVS.sh.
-  
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, 1.6 × 10<sup>-4</sup> to 1.6 × 10<sup>-6</sup> by default. Since the primitives are initialized with relatively accurate position parameters from MVS, we reduce the learning rate for the position parameters in all primitives from 1.6 × 10<sup>-6</sup> to 1.6 × 10<sup>-8</sup> with a exponential decay function
 
@@ -141,25 +167,24 @@ MVS points are obtained using dense reconstruction with Colmap, see scripts/colm
 </details>
 <br>
 
-### Multiple Machines Training 
+### Multi-node Training
 
-For multiple machines, start command on each node with corresponding parameters, and example shell scripts for launching/stopping multiple nodes training can be found in multi_node_cmds/
+We provide shell scripts to start or stop multi-node training, which can be found in the `multi_node_cmds/` directory.
 
-### Model Zoo
 
-| Data and Model                                                | PSNR | #GS   |resolution|
-|:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Room-1.6k]](https://ai-reality.github.io/RetinaGS/)         |32.86 |22.41M |1600×1036 |
-| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |4944×3284 |
-| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
+<!-- ## Usage
 
-M means Million. Add -r 1600 flag while evaluate Room-1.6k.
+### Download Data and Pretrained Model
+
+Get data and pretrained models ([[Garden]](https://ai-reality.github.io/RetinaGS/)). Place data_Garden in the data/ and model_Garden in the model/. -->
+
+
 
 ## To Do
 - [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
 - [ ] 更多训练参数描述
 - [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
-- [ ] 放到新仓，修改网址
+- [ ] 放到新仓，修改网址, 修改所有densegaussian为RetinaGS
 - [x] 清理多余文件
 - [x] 默认打开--SHRAE_GS_INFO
 - [x] 翻译并polish

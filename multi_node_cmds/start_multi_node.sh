@@ -1,7 +1,7 @@
 
 
 /bin/bash
-cd /path/2/DenseGaussian/
+cd /path/2/RetinaGS/
 
 
 # pip install tqdm plyfile tensorboard numba
