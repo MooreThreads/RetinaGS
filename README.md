@@ -56,10 +56,10 @@ The pre-trained models on several public datasets are available for download on 
 
 ## Usage 
 
-### Data
+<!-- ### Data
 The data structure should be organised as follows:
 ```
-```
+``` -->
 
 
 ### Evaluation
