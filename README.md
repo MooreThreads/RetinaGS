@@ -170,10 +170,9 @@ Shell scripts for starting or stopping multi-node training are available in the 
 
 
 ## To Do
-- [ ] Model Zoo的准备和描述(说明MatrixCity-Aerial的下载和推理)
-- [ ] 更多训练参数描述
-- [ ] 说明paper呈现结果是用的另一个分支（本分支主要优化结构，使其更易读易改）
+- [ ] Model Zoo放到Google Drive
 - [ ] 放到新仓，修改网址, 修改所有densegaussian为RetinaGS
+- [ ] ScanNet++结果补充
 - [x] 清理多余文件
 - [x] 默认打开--SHRAE_GS_INFO
 - [x] 翻译并polish
