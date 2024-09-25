@@ -30,70 +30,69 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 ## Quick Start
 
-1. Download the testing scence and the corresponded pretrained model from [GoogleDrive]() and uncompress them under the root path.
+1. Download the testing scence and the corresponded pretrained model from [GoogleDrive]() and uncompress them under the root directory.
 
-2. Evaluate the model using the command below:
+2. Evaluate the model with the following command:
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
-    main.py -s data/data_Garden -m model/model_Garden \
+CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5356 \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_3M \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
-3. The final render results, as well as the intermediate outputs of each submodule, can be found in `xxxxxx`.
+
+You can also use models trained with the [[original 3DGS repository]](https://github.com/graphdeco-inria/gaussian-splatting) by specifying the -s (source path) and -m (model path) parameters.
+
+3. The final render results, as well as the intermediate outputs of each submodule, can be found in model/Garden-1.6k_3M/img.
 
 ### Model Zoo
 
-The pre-trained models on several public datasets are available for download on [GoogleDrive]().
+The pre-trained models and corresponding data are available for download on [GoogleDrive]().
 
-| Data and Model                                                | PSNR | #GS   |Resolution|
-|:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Room-1.6k]](https://ai-reality.github.io/RetinaGS/)         |32.86 |22.41M |1600×1036 |
-| [[Bicycle-full]](https://ai-reality.github.io/RetinaGS/)      |24.86 |31.67M |4944×3284 |
-| [[MatrixCity-Aerial]](https://ai-reality.github.io/RetinaGS/) |27.70 |217.3M |1920×1080 |
+| data                                                          | model                                                         | PSNR | #GS   |Resolution|
+|:-----------------:                                            |:-----------------:                                            |:----:|:-----:|:-----:   |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_3M]]()                                          |-     |-M     |-×-       |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |-     |-M     |-×-       |
+| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |-     |-M     |-×-       |
+| [[ScanNet++]]()                                               | [[ScanNet++_32M]]()                                           |-     |-M     |-×-       |
+| [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |-     |-M     |-×-       |
 
 <!-- M means Million. Add -r 1600 flag while evaluate Room-1.6k. -->
 
 
 ## Usage 
 
-<!-- ### Data
-The data structure should be organised as follows:
-```
-``` -->
-
-
 ### Evaluation
+
+To evaluate a model, use the following command:
 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
-    main.py -s data/data_Garden -m model/model_Garden \
-        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_62M \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 4 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
-
-Our implement is based on [3DGS](https://github.com/graphdeco-inria/gaussian-splatting). Models trained using the 3DGS repository can directly run multi-GPU evaluation by simply replacing the -s and -m parameters.
 
 <details>
 <summary><span style="font-weight: bold;">More Configuration options</span></summary>
 
   #### CUDA_VISIBLE_DEVICES=0,1
-  Designate GPUs numbered CUDA_0 and CUDA_1 for Evaluation.
+  Assigns GPUs numbered CUDA_0 and CUDA_1 for evaluation.
   #### --nnodes=1 --nproc_per_node=2
-  The number of machine is 1，the number of GPU is 2.
+  Specifies the use of 1 machine and 2 GPUs.
   #### --master_addr=127.0.0.1 --master_port=7356
-  the host and port of torchrun. Ensure that the --master_port is different for different training tasks on the same machine.
+  Sets the host and port for torchrun. Ensure that the --master_port is unique for different tasks on the same machine to avoid conflicts.
   #### --source_path / -s
-  Path to the source directory containing a COLMAP or Synthetic NeRF data set.
+  The path to the source directory containing a COLMAP or Synthetic NeRF data set.
   #### --model_path / -m 
-  Path where the trained model is stored. 
+  The path where the trained model is stored. 
   #### --bvh_depth
-  Argument for controlling the number of submodels. Here, you would create 2<sup>bvh_depth</sup> submodels. In this example, bvh_depth=2, namely total 4 submodels (2 submodels for each GPU). 
+  Controls the number of submodels generated, creating 2<sup>bvh_depth</sup> submodels. For example, bvh_depth=2 results in a total of 4 submodels.
   #### --MAX_BATCH_SIZE --MAX_LOAD 
-  Arguments for controlling memory cost, a render task for a submodel weight 1 load, thus "--MAX_BATCH_SIZE 4  --MAX_LOAD 8" just set every batch as size of 4 in this case. If there is insufficient GPU memory, consider reducing these values.
+  These parameters manage memory usage, a render task for a submodel weight 1 load, thus "--MAX_BATCH_SIZE 2  --MAX_LOAD 4" just set every batch as size of 2 in this case. Reduce these values if GPU memory is insufficient.
   #### --eval
   Add this flag to use a MipNeRF360-style training/test split for evaluation.
   #### --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
-  Perform evaluation only, and save both the rendered images and the sub-images output by each submodel involved in the rendering.
+  Limits the operation to evaluation only, saving both the final rendered images and the sub-images from each submodel.
 
 </details>
 <br>
@@ -104,8 +103,8 @@ Our implement is based on [3DGS](https://github.com/graphdeco-inria/gaussian-spl
 Start training via: 
 ```
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=7356 \
-    main.py -s data/data_Garden -m model/model_Garden_default_densification \
-        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
+    main.py -s data/Garden-1.6k -m model/Garden_with_default_densification \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 4 \
         -r 1 --eval
 ```
 
@@ -116,9 +115,9 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
   #### --resolution / -r
   Specifies resolution of the loaded images before training. If provided 1, 2, 4 or 8, uses original, 1/2, 1/4 or 1/8 resolution, respectively. For all other values, rescales the width to the given number while maintaining image aspect. If not set and input image width exceeds 1.6K pixels, inputs are automatically rescaled to this target.
   #### --interations
-  Number of total iterations to train for, 30_000 by default.
+  The total number of training iterations, defaulting to 30_000.
   #### --epochs
-  Number of total epochs to train for. Effective only when --iterations is not specified.
+  The total number of training epochs. This is only effective if --iterations is not specified.
 
 </details>
 <br>
@@ -126,15 +125,20 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 
 ### Training with MVS Initialization
 
-In our paper, we use MVS initialization to control the number of Gaussian splats. You can obtain MVS results via Colmap using this script: `scripts/colmap_MVS.sh`. We recommend stopping the growth and pruning of splats during the training process. Additionally, adjusting a few hyperparameters can help stabilize the training. The following is a sample command:
+In our paper, we use MVS initialization to control the number of Gaussian splats. You can obtain MVS results via Colmap using this script: `scripts/colmap_MVS.sh`. We recommend stopping the growth and pruning of splats during the training process. Additionally, adjusting a few hyperparameters can help stabilize the training.
+
+For a trial, download the [MVS_points3D.ply](). Place it to data/Garden-1.6k/sparse/0.
+
+The following is a sample command:
 
 ```
-CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=8356 \
-    main.py -s data/data_Garden -m model/model_Garden_MVS \
-        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=5551 \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_62M \
+        --bvh_depth 2 --MAX_BATCH_SIZE 1  --MAX_LOAD 2 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
-        --points3D MVS_points3D --pointcloud_sample_rate 1        
+        --points3D MVS_points3D --pointcloud_sample_rate 1 \
+        --iterations 60000        
 ```
 
 <details>
@@ -144,27 +148,23 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
   Initial and Final 3D position learning rate, 1.6 × 10<sup>-4</sup> to 1.6 × 10<sup>-6</sup> by default. Since the primitives are initialized with relatively accurate position parameters from MVS, we reduce the learning rate for the position parameters in all primitives from 1.6 × 10<sup>-6</sup> to 1.6 × 10<sup>-8</sup> with a exponential decay function
 
   #### --densify_until_iter
-  Iteration where densification stops, ```15000``` by default and ```0``` for abandon.
+  Specifies the iteration at which densification stops, defaulting to 15,000 and set to 0 to disable.
 
   #### --points3D
-  Specify the point cloud file used for initialization.
+  The point cloud file used for initialization.
 
   #### --pointcloud_sample_rate
-  Specify the downsampling rate at initialization; if N is provided, use 1/N of the point cloud. Consider increasing the downsampling ratio when using MVS initialization if there is not enough GPU memory.
+  Sets the downsampling rate at initialization; for instance, providing N uses 1/N of the point cloud. Increase the downsampling ratio when using MVS initialization if GPU memory is insufficient.
 
   #### --SPLIT_MODEL
-  Output individual ply files for each submodel plus interface information; consider adding this flag to improve read and write overhead when there are too many GS.
-
-  #### --NOT_SHRAE_GS_INFO
-  By dafult, we transmit interface GS via communication, achieving the equivalent of single-GPU training results in formulation together with alpha-blending splitting.
-  When the --SPLIT_MODEL flag is enabled, consider adding the --NOT_SHARE_GS_INFO flag to slightly speed up training and reduce GPU memory usage.
+  Enables reading individual ply files for each submodel plus interface information, which can reduce read and write overhead with numerous GS.
 
 </details>
 <br>
 
 ### Multi-node Training
 
-We provide shell scripts to start or stop multi-node training, which can be found in the `multi_node_cmds/` directory.
+Shell scripts for starting or stopping multi-node training are available in the multi_node_cmds/ directory.
 <br>
 
 
