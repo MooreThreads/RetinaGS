@@ -50,11 +50,11 @@ The pre-trained models and corresponding data are available for download on [Goo
 
 | data                                                          | model                                                         | PSNR | #GS   |Resolution|
 |:-----------------:                                            |:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_3M]]()                                          |-     |-M     |-×-       |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |-     |-M     |-×-       |
-| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |-     |-M     |-×-       |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_3M]]()                                          |-     |-      |-×-       |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |-     |62.9M  |-×-       |
+| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |-     |62.9M  |-×-       |
 | [[ScanNet++]]()                                               | [[ScanNet++_32M]]()                                           |-     |-M     |-×-       |
-| [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |-     |-M     |-×-       |
+| [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |27.77 |217.3M |1920×1080 |
 
 <!-- M means Million. Add -r 1600 flag while evaluate Room-1.6k. -->
 
