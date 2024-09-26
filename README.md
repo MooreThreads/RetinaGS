@@ -50,9 +50,9 @@ The pre-trained models and corresponding data are available for download on [Goo
 
 | data                                                          | model                                                         | PSNR | #GS   |Resolution|
 |:-----------------:                                            |:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_3M]]()                                          |-     |-      |-×-       |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |-     |62.9M  |-×-       |
-| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |-     |62.9M  |-×-       |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_5M]]()                                          |27.33 |5.6M   |1600×1036 |
+| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |27.63 |62.9M  |1600×1036 |
+| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |26.95 |62.9M  |5185×3359 |
 | [[ScanNet++]]()                                               | [[ScanNet++_32M]]()                                           |-     |-M     |-×-       |
 | [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |27.77 |217.3M |1920×1080 |
 
