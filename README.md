@@ -13,11 +13,11 @@ We introduce RetinaGS, which explores the possibility of training high-parameter
 ## Prerequisites
 
 1. Clone this repository:
+
 ```
 git clone https://github.com/mthreads/DenseGaussian.git --recursive
 cd DenseGaussian
 ```
-
 
 2. Installation:
 
@@ -35,14 +35,14 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 2. Evaluate the model with the following command:
 ```
 CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5356 \
-    main.py -s data/Garden-1.6k -m model/Garden-1.6k_3M \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
         --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
 You can also use models trained with the [[original 3DGS repository]](https://github.com/graphdeco-inria/gaussian-splatting) by specifying the -s (source path) and -m (model path) parameters.
 
-3. The final render results, as well as the intermediate outputs of each submodule, can be found in model/Garden-1.6k_3M/img.
+3. The final render results, as well as the intermediate outputs of each submodule, can be found in model/Garden-1.6k_5M/img.
 
 ### Model Zoo
 
@@ -53,7 +53,6 @@ The pre-trained models and corresponding data are available for download on [Goo
 | [[Garden-1.6k]]()                                             | [[Garden-1.6k_5M]]()                                          |27.33 |5.6M   |1600×1036 |
 | [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |27.63 |62.9M  |1600×1036 |
 | [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |26.95 |62.9M  |5185×3359 |
-| [[ScanNet++]]()                                               | [[ScanNet++_32M]]()                                           |-     |-M     |-×-       |
 | [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |27.77 |217.3M |1920×1080 |
 
 <!-- M means Million. Add -r 1600 flag while evaluate Room-1.6k. -->
@@ -114,7 +113,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 
   #### --resolution / -r
   Specifies resolution of the loaded images before training. If provided 1, 2, 4 or 8, uses original, 1/2, 1/4 or 1/8 resolution, respectively. For all other values, rescales the width to the given number while maintaining image aspect. If not set and input image width exceeds 1.6K pixels, inputs are automatically rescaled to this target.
-  #### --interations
+  #### --iterations
   The total number of training iterations, defaulting to 30_000.
   #### --epochs
   The total number of training epochs. This is only effective if --iterations is not specified.
@@ -126,8 +125,6 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ### Training with MVS Initialization
 
 In our paper, we use MVS initialization to control the number of Gaussian splats. You can obtain MVS results via Colmap using this script: `scripts/colmap_MVS.sh`. We recommend stopping the growth and pruning of splats during the training process. Additionally, adjusting a few hyperparameters can help stabilize the training.
-
-For a trial, download the [MVS_points3D.ply](). Place it to data/Garden-1.6k/sparse/0.
 
 The following is a sample command:
 
