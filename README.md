@@ -15,8 +15,8 @@ We introduce RetinaGS, which explores the possibility of training high-parameter
 1. Clone this repository:
 
 ```
-git clone https://github.com/mthreads/DenseGaussian.git --recursive
-cd DenseGaussian
+git clone https://github.com/MooreThreads/RetinaGS.git --recursive
+cd RetinaGS
 ```
 
 2. Installation:
