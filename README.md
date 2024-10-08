@@ -169,25 +169,6 @@ Shell scripts for starting or stopping multi-node training are available in the 
 
 
 
-## To Do
-- [ ] Model Zoo放到Google Drive
-- [ ] 放到新仓，修改网址, 修改所有densegaussian为RetinaGS
-- [ ] ScanNet++结果补充
-- [x] 清理多余文件
-- [x] 默认打开--SHRAE_GS_INFO
-- [x] 翻译并polish
-- [x] 加上指定iteration的训练
-- [x] 1.6k输出时多余提示
-- [x] 支持Evaluation输出LPIPS和SSIM
-- [x] 统一evaluation输出到外层
-- [x] 使用--SPLIT_MODEL代替--WHOLE_MODEL
-- [x] 新读入单独ply形式（通信使用send recv形式，shared GS形式-无交集，可达到无损，强制Guide用户使用）
-- [x] 测试Output as one whole model + --SHRAE_GS_INFO（证明和单卡训练结果接近，可近乎无损合并+重新分割）
-- [x] data_Garden_MVS（降采样4倍Graden，作为示例）
-- [x] Output as one whole model（不加shared GS，边界面会出问题）
-- [x] Colmap MVS脚本 + 测试 + 说明
-- [x] 读入单独ply（无shared GS）
-
 ## Citation
 Please cite the following paper if you use this repository in your reseach or work.
 ```
