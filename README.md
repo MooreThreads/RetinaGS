@@ -42,30 +42,30 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 ## Quick Start
 
-1. Download the testing scence and the corresponded pretrained model from [GoogleDrive]() and uncompress them under the root directory.
+1. Download the testing scence `data/Garden-1.6k` and the corresponded pretrained model `model/Garden-1.6k_5M` from [GoogleDrive](https://drive.google.com/drive/u/0/folders/1JzkZ8FZQ7IcBjSQLAOln9bcfwFwRCMQi) and place them in the root directory.
 
 2. Evaluate the model with the following command:
 ```
 CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5356 \
     main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M \
-        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
+        --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 4 \
         -r 1 --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
-You can also use models trained with the [[original 3DGS repository]](https://github.com/graphdeco-inria/gaussian-splatting) by specifying the -s (source path) and -m (model path) parameters.
+You can also use models trained with the [original 3DGS repository](https://github.com/graphdeco-inria/gaussian-splatting) by specifying the -s (source path) and -m (model path) parameters.
 
 3. The final render results, as well as the intermediate outputs of each submodule, can be found in model/Garden-1.6k_5M/img.
 
 ### Model Zoo
 
-The pre-trained models and corresponding data are available for download on [GoogleDrive]().
+The pre-trained models and corresponding data are available for download on [GoogleDrive](https://drive.google.com/drive/u/0/folders/1JzkZ8FZQ7IcBjSQLAOln9bcfwFwRCMQi).
 
-| data                                                          | model                                                         | PSNR | #GS   |Resolution|
-|:-----------------:                                            |:-----------------:                                            |:----:|:-----:|:-----:   |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_5M]]()                                          |27.33 |5.6M   |1600×1036 |
-| [[Garden-1.6k]]()                                             | [[Garden-1.6k_62M]]()                                         |27.63 |62.9M  |1600×1036 |
-| [[Garden-full]]()                                             | [[Garden-full_62M]]()                                         |26.95 |62.9M  |5185×3359 |
-| [[MatrixCity-Aerial]]()                                       | [[MatrixCity-Aerial_217M]]()                                  |27.77 |217.3M |1920×1080 |
+| data                | model                     | PSNR | #GS   |Resolution|
+|:-----------------:  |:-----------------:        |:----:|:-----:|:-----:   |
+| `Garden-1.6k`       | `Garden-1.6k_5M`          |27.33 |5.6M   |1600×1036 |
+| `Garden-1.6k`       | `Garden-1.6k_62M`         |27.61 |62.9M  |1600×1036 |
+| `Garden-full`       | `Garden-full_62M`         |26.94 |62.9M  |5185×3359 |
+| `MatrixCity-Aerial` | `MatrixCity-Aerial_217M`  |27.77 |217.3M |1920×1080 |
 
 <!-- M means Million. Add -r 1600 flag while evaluate Room-1.6k. -->
 
@@ -151,7 +151,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=4 --master_add
 ```
 
 <details>
-<summary><span style="font-weight: bold;">More Configuration options</span></summary>
+<summary><span style="font-weight: bold;">More configuration options</span></summary>
 
   #### --position_lr_init --position_lr_final
   Initial and Final 3D position learning rate, 1.6 × 10<sup>-4</sup> to 1.6 × 10<sup>-6</sup> by default. Since the primitives are initialized with relatively accurate position parameters from MVS, we reduce the learning rate for the position parameters in all primitives from 1.6 × 10<sup>-6</sup> to 1.6 × 10<sup>-8</sup> with a exponential decay function

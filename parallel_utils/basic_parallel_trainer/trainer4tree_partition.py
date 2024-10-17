@@ -65,6 +65,7 @@ class Trainer4TreePartition:
         self.REPARTITION_END_EPOCH:int = args.REPARTITION_END_EPOCH
         self.REPARTITION_INTERVAL_EPOCH:int = args.REPARTITION_INTERVAL_EPOCH 
         self.SHRAE_GS_INFO:bool = not args.NOT_SHRAE_GS_INFO
+        self.USE_RELATION_CACHE = args.USE_RELATION_CACHE
 
         self.Z_NEAR:float = args.Z_NEAR
         self.Z_FAR:float = args.Z_FAR
@@ -112,9 +113,9 @@ class Trainer4TreePartition:
         # self.model_id2box, self.model_id2rank, self.local_model_ids = model_id2box, model_id2rank, local_model_ids
         # self.rkmd = task_utils.RankModelInfo(NUM_RANKS, NUM_MODELS, self.model_id2rank)
         self.train_rlt:torch.Tensor = scene_utils.get_camera_model_relation_dist(os.path.join(self.scene.model_path, 'trainset_relation.pt'), 
-            self.train_dataset, len(self.model_id2box), self.path2bvh_nodes, self.sorted_leaf_nodes, self.Z_NEAR, self.Z_FAR, self.logger)
+            self.train_dataset, len(self.model_id2box), self.path2bvh_nodes, self.sorted_leaf_nodes, self.Z_NEAR, self.Z_FAR, self.USE_RELATION_CACHE, self.logger)
         self.test_rlt:torch.Tensor = scene_utils.get_camera_model_relation_dist(os.path.join(self.scene.model_path, 'testset_relation.pt'),
-            self.test_dataset, len(self.model_id2box), self.path2bvh_nodes, self.sorted_leaf_nodes, self.Z_NEAR, self.Z_FAR, self.logger)
+            self.test_dataset, len(self.model_id2box), self.path2bvh_nodes, self.sorted_leaf_nodes, self.Z_NEAR, self.Z_FAR, self.USE_RELATION_CACHE, self.logger)
         if self.RANK == 0:
             torch.save(self.train_rlt, os.path.join(self.scene.model_path, 'trainset_relation.pt'))
             torch.save(self.test_rlt, os.path.join(self.scene.model_path, 'testset_relation.pt'))
@@ -154,11 +155,12 @@ class Trainer4TreePartition:
             # use whole model
             if self.WHOLE_MODEL:
                 scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist_whole_model(
-                    self.scene, self.SCENE_GRID_SIZE, self.bvh_depth, load=None, position=self.whole_model.xyz, 
+                    self.SCENE_GRID_SIZE, self.bvh_depth, load=None, memory_model=self.whole_model, 
                     SPLIT_ORDERS=self.SPLIT_ORDERS, pre_load_grid=None, conflict={}, logger=self.logger)
             # use split model
-            else:                
-                scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist(self.scene, load_iteration, self.SCENE_GRID_SIZE, self.logger)
+            else:       
+                if load_iteration > 0:                 
+                    scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.load_BvhTree_on_3DGrid_dist(self.scene, load_iteration, self.SCENE_GRID_SIZE, self.logger)
         else: 
             scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes = scene_utils.init_BvhTree_on_3DGrid_dist(
                 self.scene, self.SCENE_GRID_SIZE, self.bvh_depth, load=None, position=self.scene.point_cloud.points, 
@@ -773,4 +775,3 @@ class Trainer4TreePartition:
                 model_id = name
                 _gaussians:BoundedGaussianModel = self.gaussians_group.get_model(name)
                 self.tb_writer.add_scalar('total_points_{}'.format(model_id), _gaussians.get_xyz.shape[0], train_iteration)
-

@@ -108,6 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--EVAL_ONLY", action='store_true', default=False)
     parser.add_argument("--SAVE_EVAL_IMAGE", action='store_true', default=False)
     parser.add_argument("--SAVE_EVAL_SUB_IMAGE", action='store_true', default=False)
+    parser.add_argument("--USE_RELATION_CACHE", action='store_true', default=False)
     
     parser.add_argument("--log_level", type=int, default=10, 
         help='CRITICAL=50, FATAL=CRITICAL, ERROR=40, WARNING=30, WARN=WARNING, INFO=20, DEBUG=10, NOTSET=0')

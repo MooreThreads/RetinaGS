@@ -189,7 +189,6 @@ class MemoryGaussianModel():
             flag = torch.all(_flag, dim=-1, keepdim=False)
             self.gs_submodel_id[flag] = model_id
             self.num_gs_rank[model_id2rank[model_id]] += flag.sum()        
-            # print('num_gs_rank {}'.format(self.num_gs_rank))
         self.num_gs_rank = self.num_gs_rank.cuda()
     
     def np2torch(self):
@@ -229,16 +228,6 @@ class MemoryGaussianModel():
         self.ops.append(dist.P2POp(dist.isend, send_rots, SEND_TO_RANK))
         self.ops.append(dist.P2POp(dist.isend, send_gs_submodel_id, SEND_TO_RANK))
         
-        # print("add send task to RANK {} send_xyz shape {} type {}".format(SEND_TO_RANK, send_xyz.shape, send_xyz.type()))
-        # print("add send task to RANK {} send_opacities shape {} type {}".format(SEND_TO_RANK, send_opacities.shape, send_opacities.type()))
-        # print("add send task to RANK {} send_features_dc shape {} type {}".format(SEND_TO_RANK, send_features_dc.shape, send_features_dc.type()))
-        # print("add send task to RANK {} send_features_extra shape {} type {}".format(SEND_TO_RANK, send_features_extra.shape, send_features_extra.type()))
-        # print("add send task to RANK {} send_scales shape {} type {}".format(SEND_TO_RANK, send_scales.shape, send_scales.type()))
-        # print("add send task to RANK {} send_rots shape {} type {}".format(SEND_TO_RANK, send_rots.shape, send_rots.type()))
-        # print("add send task to RANK {} send_gs_submodel_id shape {} type {}".format(SEND_TO_RANK, send_gs_submodel_id.shape, send_gs_submodel_id.type()))
-        
-        # print("add send task to RANK {} recive size {}".format(SEND_TO_RANK, send_xyz.shape[0]))
-        
     
     def add_recv_list(self, CURRENT_RANK, RECV_FROM_RANK):
         # init
@@ -263,16 +252,6 @@ class MemoryGaussianModel():
         self.ops.append(dist.P2POp(dist.irecv, self.rots, RECV_FROM_RANK))
         self.ops.append(dist.P2POp(dist.irecv, self.gs_submodel_id, RECV_FROM_RANK))
         
-        # print("add recv task to RANK {} self.xyz shape {} type {}".format(CURRENT_RANK, self.xyz.shape, self.xyz.type()))
-        # print("add recv task to RANK {} self.opacities shape {} type {}".format(CURRENT_RANK, self.opacities.shape, self.opacities.type()))
-        # print("add recv task to RANK {} self.features_dc shape {} type {}".format(CURRENT_RANK, self.features_dc.shape, self.features_dc.type()))
-        # print("add recv task to RANK {} self.features_extra shape {} type {}".format(CURRENT_RANK, self.features_extra.shape, self.features_extra.type()))
-        # print("add recv task to RANK {} self.scales shape {} type {}".format(CURRENT_RANK, self.scales.shape, self.scales.type()))
-        # print("add recv task to RANK {} self.rots shape {} type {}".format(CURRENT_RANK, self.rots.shape, self.rots.type()))
-        # print("add recv task to RANK {} self.gs_submodel_id shape {} type {}".format(CURRENT_RANK, self.gs_submodel_id.shape, self.gs_submodel_id.type()))
-        
-        # print("add recv task to RANK {} recive size {}".format(CURRENT_RANK, self.xyz.shape[0]))
-        # print("RECV FROM {}".format(RECV_FROM_RANK))
     
     def send_recv(self):
         if len(self.ops) > 0:
@@ -297,6 +276,22 @@ class MemoryGaussianModel():
             self.scales = self.scales[select_gs].cuda()
             self.rots = self.rots[select_gs].cuda()
             self.gs_submodel_id = self.gs_submodel_id[select_gs].cuda()
+    
+    def get_scaling(self):
+        scaling_activation = np.exp
+        return scaling_activation(self.scales)
+    
+    def get_grid_tensor(self, SCENE_GRID_SIZE, scale_factor=1):
+        
+        scale = scale_factor * self.get_scaling()
+        max_radii = np.max(scale, axis=0)
+        max_radii = max_radii * 3
+        _SPACE_RANGE_LOW, _SPACE_RANGE_UP = self.xyz.min(axis=0, keepdims=False) - max_radii, self.xyz.max(axis=0, keepdims=False) + max_radii
+        _VOXEL_SIZE = (_SPACE_RANGE_UP - _SPACE_RANGE_LOW)/SCENE_GRID_SIZE - 1e-7
+        grid_np = np.array([_SPACE_RANGE_LOW, _SPACE_RANGE_UP, _VOXEL_SIZE])
+        grid_tensor = torch.tensor(grid_np, dtype=torch.float32, device='cuda')
+        
+        return grid_tensor
 
 class GaussianModel2(nn.Module):
     def setup_functions(self):
@@ -1120,4 +1115,3 @@ class BoundedGaussianModelGroup(nn.Module):
         for k in self.all_gaussians:
             ret.append(f"{k}:{self.all_gaussians[k].get_info()}")
         return '\n'.join(ret)
-
