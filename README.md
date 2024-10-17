@@ -28,6 +28,18 @@ conda activate retina_gs
 
 Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
+<details>
+<summary><span style="font-weight: bold;">More installation detail</span></summary>
+  
+  If you already have the environment set up from the [original 3DGS repository](https://github.com/graphdeco-inria/gaussian-splatting), you can quickly get started by running the following command:
+
+  ```shell
+  pip install rasterization_kernels/diff-gaussian-rasterization-half-gaussian/ numba scipy
+  ```
+
+</details>
+<br>
+
 ## Quick Start
 
 1. Download the testing scence and the corresponded pretrained model from [GoogleDrive]() and uncompress them under the root directory.
@@ -102,7 +114,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 Start training via: 
 ```
 CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5551 \
-    main.py -s data/Garden-1.6k_test -m model/Garden-1.6k_5M \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M \
         --bvh_depth 1 --MAX_BATCH_SIZE 1  --MAX_LOAD 2 \
         -r 1 --eval
 ```
