@@ -13,7 +13,6 @@ from scene.cameras import Camera, EmptyCamera, Patch
 import torch
 from torch.utils.data import Dataset
 import numpy as np
-import cv2
 
 
 def getCameraListDataset(camera_infos:list, resolution_scale:float, args:ModelParams):

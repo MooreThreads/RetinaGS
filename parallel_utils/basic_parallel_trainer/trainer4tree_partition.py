@@ -4,7 +4,7 @@ from tqdm import tqdm
 import numpy as np
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
-import torch, torchvision, cv2, datetime
+import torch, torchvision, datetime
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import torch.multiprocessing as mp
