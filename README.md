@@ -114,7 +114,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 Start training via: 
 ```
 CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5551 \
-    main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M_own \
         --bvh_depth 1 --MAX_BATCH_SIZE 1  --MAX_LOAD 2 \
         -r 1 --eval
 ```
@@ -142,7 +142,7 @@ The following is a sample command:
 
 ```
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=5551 \
-    main.py -s data/Garden-1.6k -m model/Garden-1.6k_62M \
+    main.py -s data/Garden-1.6k -m model/Garden-1.6k_62M_own \
         --bvh_depth 2 --MAX_BATCH_SIZE 1  --MAX_LOAD 2 \
         -r 1 --eval \
         --position_lr_init 0.0000016 --position_lr_final 0.000000016 --densify_until_iter 0 \
