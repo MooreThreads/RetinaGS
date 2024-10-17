@@ -42,7 +42,7 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 ## Quick Start
 
-1. Download the testing scence `data/Garden-1.6k` and the corresponded pretrained model `model/Garden-1.6k_5M` from [GoogleDrive](https://drive.google.com/drive/u/0/folders/1JzkZ8FZQ7IcBjSQLAOln9bcfwFwRCMQi) and place them in the root directory.
+1. Download the testing scence and the corresponded pretrained model from [GoogleDrive](https://drive.google.com/drive/folders/1gRiMixAtCS7dZ5q2v_DGMXcHWggMfNRk?usp=drive_link) and place them in the root directory.
 
 2. Evaluate the model with the following command:
 ```
