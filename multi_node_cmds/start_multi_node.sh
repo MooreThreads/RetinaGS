@@ -14,8 +14,6 @@ ps aux|grep render_MP_|awk '{print $2}'|xargs kill -9
 source /root/anaconda3/bin/activate
 conda init
 source ~/.bashrc
-# conda activate dense
-# pip install tensorboad
 conda activate retina_gs
 
 env

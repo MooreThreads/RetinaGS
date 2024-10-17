@@ -29,7 +29,7 @@ conda activate retina_gs
 Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 
 <details>
-<summary><span style="font-weight: bold;">More installation detail</span></summary>
+<summary><span style="font-weight: bold;">More installation details</span></summary>
   
   If you already have the environment set up from the [original 3DGS repository](https://github.com/graphdeco-inria/gaussian-splatting), you can quickly get started by running the following command:
 
@@ -84,7 +84,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=12
 ```
 
 <details>
-<summary><span style="font-weight: bold;">More Configuration options</span></summary>
+<summary><span style="font-weight: bold;">More configuration options</span></summary>
 
   #### CUDA_VISIBLE_DEVICES=0,1
   Assigns GPUs numbered CUDA_0 and CUDA_1 for evaluation.
@@ -120,7 +120,7 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.
 ```
 
 <details>
-<summary><span style="font-weight: bold;">More Configuration options</span></summary>
+<summary><span style="font-weight: bold;">More configuration options</span></summary>
 
 
   #### --resolution / -r
@@ -176,7 +176,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nnodes=1 --nproc_per_node=4 --master_add
 
 ### Multi-node Training
 
-Shell scripts for starting or stopping multi-node training are available in the multi_node_cmds/ directory.
+Shell scripts for starting or stopping multi-node training are available in the multi_node_cmds/ directory. Please ensure that the inter-machine communication for torchrun is functioning properly (like InfiniBand).
 <br>
 
 
