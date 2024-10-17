@@ -14,6 +14,5 @@ done;
 
 for(( i=0;i<${#NODE_LIST[@]};i++)) do
 ssh -p 30022 root@${NODE_LIST[i]} "ps aux|grep torchrun|awk 'NR==1'|awk '{print \$2}'|xargs kill -9"
-ssh -p 30022 root@${NODE_LIST[i]} "ps aux|grep train_MP_|awk '{print \$2}'|xargs kill -9"
-ssh -p 30022 root@${NODE_LIST[i]} "ps aux|grep render_MP_|awk '{print \$2}'|xargs kill -9"
+ssh -p 30022 root@${NODE_LIST[i]} "ps aux|grep main|awk '{print \$2}'|xargs kill -9"
 done;

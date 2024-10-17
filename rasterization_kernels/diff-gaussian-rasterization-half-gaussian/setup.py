@@ -15,7 +15,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import CUDAExtension, BuildExtension
 import os
 os.path.dirname(os.path.abspath(__file__))
-glm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../third_party/glm/")
+glm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")
 
 setup(
     name="diff_gaussian_rasterization_half_gaussian",

@@ -11,7 +11,7 @@ from utils.workload_utils import NaiveWorkloadBalancer
 from utils.datasets import DatasetRepeater, GroupedItems, CameraListDataset
 import parallel_utils.grid_utils.utils as pgu
 
-from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup
+from scene.gaussian_nn_module import BoundedGaussianModel, BoundedGaussianModelGroup, MemoryGaussianModel
 from scene.cameras import Camera, EmptyCamera
 from scene.scene4bounded_gaussian import SceneV3
 
@@ -66,12 +66,21 @@ def init_BvhTreeNode_Rank0(scene_3d_grid:pgu.Grid3DSpace, bvh_depth:int, load:np
 
     return path2bvh_nodes, sorted_leaf_nodes
 
-def load_BvhTree_on_3DGrid_dist_whole_model(scene:SceneV3, SCENE_GRID_SIZE:List[int], bvh_depth:int, load:np.ndarray, position:np.ndarray, SPLIT_ORDERS:list, pre_load_grid:np.ndarray, conflict:Dict[str, pgu.BvhTreeNodeon3DGrid], logger:logging.Logger):
+def load_BvhTree_on_3DGrid_dist_whole_model(SCENE_GRID_SIZE:List[int], bvh_depth:int, load:np.ndarray, memory_model:MemoryGaussianModel, SPLIT_ORDERS:list, pre_load_grid:np.ndarray, conflict:Dict[str, pgu.BvhTreeNodeon3DGrid], logger:logging.Logger):
     RANK = dist.get_rank()
-    scene_3d_grid = init_grid_dist(scene, SCENE_GRID_SIZE)
+    
+    grid_tensor = torch.zeros((3, 3), dtype=torch.float32, device='cuda')
+    
+    if RANK == 0:    
+        grid_tensor = memory_model.get_grid_tensor(SCENE_GRID_SIZE)       
+
+    dist.broadcast(grid_tensor, src=0, group=None, async_op=False)
+    grid_numpy = grid_tensor.cpu().numpy()
+    SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE = grid_numpy[0], grid_numpy[1], grid_numpy[2]    
+    scene_3d_grid = pgu.Grid3DSpace(SPACE_RANGE_LOW, SPACE_RANGE_UP, VOXEL_SIZE)
     path2bvh_nodes, sorted_leaf_nodes = None, None
     if RANK == 0:
-        path2bvh_nodes, sorted_leaf_nodes = init_BvhTreeNode_Rank0(scene_3d_grid, bvh_depth, load, position, SPLIT_ORDERS, pre_load_grid, conflict, logger)
+        path2bvh_nodes, sorted_leaf_nodes = init_BvhTreeNode_Rank0(scene_3d_grid, bvh_depth, load, memory_model.xyz, SPLIT_ORDERS, pre_load_grid, conflict, logger)
     
     return scene_3d_grid, path2bvh_nodes, sorted_leaf_nodes
 
@@ -308,7 +317,7 @@ def get_camera_model_relation_Rank0(camera_list:CameraListDataset, path2bvh_node
 
     return complete_relation 
 
-def get_camera_model_relation_dist(ckpt:str, camera_list:CameraListDataset, NUM_MODELS:int, path2bvh_nodes:Dict[str, pgu.BvhTreeNodeon3DGrid], sorted_leaf_nodes:List[pgu.BvhTreeNodeon3DGrid], z_min:float, z_max:float, logger:logging.Logger):
+def get_camera_model_relation_dist(ckpt:str, camera_list:CameraListDataset, NUM_MODELS:int, path2bvh_nodes:Dict[str, pgu.BvhTreeNodeon3DGrid], sorted_leaf_nodes:List[pgu.BvhTreeNodeon3DGrid], z_min:float, z_max:float, USE_RELATION_CACHE:bool, logger:logging.Logger):
     # if serialization/unserialization method of BVHTreeNode are implemented
     # camera_model_relation can be calculated by multiple nodes (single rank can already launch multiple processes via Dataloader)
     # as burning is familiar with burning's laziness, he decided not to do these 
@@ -316,7 +325,7 @@ def get_camera_model_relation_dist(ckpt:str, camera_list:CameraListDataset, NUM_
     NUM_SAMPLES = len(camera_list)
     find_available_ckpt = False
     if RANK == 0:
-        if (ckpt is not None) and len(ckpt)>0 and os.path.exists(ckpt): 
+        if (ckpt is not None) and len(ckpt)>0 and os.path.exists(ckpt) and USE_RELATION_CACHE: 
             relation_tensor_cpu:torch.Tensor = torch.load(ckpt)
             if relation_tensor_cpu.shape[0]==len(camera_list) and relation_tensor_cpu.shape[1]==len(sorted_leaf_nodes):
                 relation_tensor = relation_tensor_cpu.cuda()
@@ -405,4 +414,3 @@ def get_grouped_indices_dist(model2rank:dict, relation_matrix:torch.Tensor, shuf
             groups.append(tuple(shuffled_indices[g_head:(g_head + g_size)]))
         g_head += g_size
     return groups  
-
