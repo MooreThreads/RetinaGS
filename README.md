@@ -49,7 +49,7 @@ Please note that we only test RetinaGS on Ubuntu 20.04.1 LTS.
 CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 --master_addr=127.0.0.1 --master_port=5356 \
     main.py -s data/Garden-1.6k -m model/Garden-1.6k_5M \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 2 \
-        --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
+        -r 1 --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
 You can also use models trained with the [[original 3DGS repository]](https://github.com/graphdeco-inria/gaussian-splatting) by specifying the -s (source path) and -m (model path) parameters.
@@ -80,7 +80,7 @@ To evaluate a model, use the following command:
 CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=5356 \
     main.py -s data/Garden-1.6k -m model/Garden-1.6k_62M \
         --bvh_depth 2 --MAX_BATCH_SIZE 2  --MAX_LOAD 4 \
-        --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
+        -r 1 --eval --EVAL_ONLY --SAVE_EVAL_IMAGE --SAVE_EVAL_SUB_IMAGE
 ```
 
 <details>
